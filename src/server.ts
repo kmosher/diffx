@@ -4,6 +4,8 @@ import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName } from './git.js'
 import { loadSettings, saveSettings } from './settings.js'
+import { InMemoryCommentStore } from './comments.js'
+import type { CommentStore } from './comments.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -15,9 +17,10 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 }
 
-export function createApp(clientDir: string, customDiffArgs?: string[]) {
+export function createApp(clientDir: string, customDiffArgs?: string[], commentStore?: CommentStore) {
   const app = new Hono()
   const isCustomMode = !!customDiffArgs
+  const store = commentStore ?? new InMemoryCommentStore()
 
   app.get('/api/diff', (c) => {
     let patch: string
@@ -41,6 +44,41 @@ export function createApp(clientDir: string, customDiffArgs?: string[]) {
     const body = await c.req.json()
     const settings = saveSettings(body)
     return c.json(settings)
+  })
+
+  app.get('/api/comments', async (c) => {
+    const comments = await store.getAll()
+    return c.json(comments)
+  })
+
+  app.post('/api/comments', async (c) => {
+    const body = await c.req.json()
+    const comment = {
+      id: crypto.randomUUID(),
+      filePath: body.filePath,
+      side: body.side,
+      lineNumber: body.lineNumber,
+      lineContent: body.lineContent,
+      body: body.body,
+      createdAt: Date.now(),
+    }
+    const created = await store.add(comment)
+    return c.json(created, 201)
+  })
+
+  app.put('/api/comments/:id', async (c) => {
+    const id = c.req.param('id')
+    const { body } = await c.req.json()
+    const updated = await store.update(id, body)
+    if (!updated) return c.json({ error: 'Comment not found' }, 404)
+    return c.json(updated)
+  })
+
+  app.delete('/api/comments/:id', async (c) => {
+    const id = c.req.param('id')
+    const removed = await store.remove(id)
+    if (!removed) return c.json({ error: 'Comment not found' }, 404)
+    return c.json({ ok: true })
   })
 
   app.get('/*', async (c) => {

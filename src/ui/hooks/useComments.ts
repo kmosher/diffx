@@ -1,35 +1,79 @@
-import { useState, useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DiffLineAnnotation } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
 
-let nextId = Date.now()
+const COMMENTS_KEY = ['comments']
+
+async function fetchComments(): Promise<ReviewComment[]> {
+  const res = await fetch('/api/comments')
+  return res.json()
+}
 
 export function useComments() {
-  const [comments, setComments] = useState<ReviewComment[]>([])
+  const queryClient = useQueryClient()
+  const { data: comments = [] } = useQuery({ queryKey: COMMENTS_KEY, queryFn: fetchComments })
+
+  const addMutation = useMutation({
+    mutationFn: async (params: { filePath: string; side: 'deletions' | 'additions'; lineNumber: number; lineContent: string; body: string }) => {
+      const res = await fetch('/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      })
+      return res.json() as Promise<ReviewComment>
+    },
+    onSuccess: (comment) => {
+      queryClient.setQueryData<ReviewComment[]>(COMMENTS_KEY, (prev = []) => [...prev, comment])
+    },
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      await fetch(`/api/comments/${id}`, { method: 'DELETE' })
+      return id
+    },
+    onSuccess: (id) => {
+      queryClient.setQueryData<ReviewComment[]>(COMMENTS_KEY, (prev = []) => prev.filter((c) => c.id !== id))
+    },
+  })
+
+  const editMutation = useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: string }) => {
+      const res = await fetch(`/api/comments/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body }),
+      })
+      return res.json() as Promise<ReviewComment>
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData<ReviewComment[]>(COMMENTS_KEY, (prev = []) =>
+        prev.map((c) => (c.id === updated.id ? updated : c)),
+      )
+    },
+  })
 
   const addComment = useCallback(
     (filePath: string, side: 'deletions' | 'additions', lineNumber: number, lineContent: string, body: string) => {
-      const comment: ReviewComment = {
-        id: String(nextId++),
-        filePath,
-        side,
-        lineNumber,
-        lineContent,
-        body,
-        createdAt: Date.now(),
-      }
-      setComments((prev) => [...prev, comment])
+      addMutation.mutate({ filePath, side, lineNumber, lineContent, body })
     },
-    [],
+    [addMutation],
   )
 
-  const removeComment = useCallback((id: string) => {
-    setComments((prev) => prev.filter((c) => c.id !== id))
-  }, [])
+  const removeComment = useCallback(
+    (id: string) => {
+      removeMutation.mutate(id)
+    },
+    [removeMutation],
+  )
 
-  const editComment = useCallback((id: string, body: string) => {
-    setComments((prev) => prev.map((c) => (c.id === id ? { ...c, body } : c)))
-  }, [])
+  const editComment = useCallback(
+    (id: string, body: string) => {
+      editMutation.mutate({ id, body })
+    },
+    [editMutation],
+  )
 
   const formatAllComments = useCallback((): string => {
     if (comments.length === 0) return ''
