@@ -1,11 +1,14 @@
 import type { FileDiffMetadata, DiffLineAnnotation, AnnotationSide } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
+import type { BinaryFileInfo } from '../hooks/useDiff'
 import { FileDiffCard } from './FileDiffCard'
+import { BinaryFileDiff } from './BinaryFileDiff'
 
 interface DiffViewerProps {
   files: FileDiffMetadata[]
   diffStyle: 'split' | 'unified'
   viewedFiles: Set<string>
+  binaryFiles: Map<string, BinaryFileInfo>
   onViewedChange: (filePath: string, viewed: boolean) => void
   getAnnotationsForFile: (filePath: string) => DiffLineAnnotation<ReviewComment>[]
   onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, lineContent: string, body: string) => void
@@ -16,6 +19,7 @@ export function DiffViewer({
   files,
   diffStyle,
   viewedFiles,
+  binaryFiles,
   onViewedChange,
   getAnnotationsForFile,
   onAddComment,
@@ -33,6 +37,18 @@ export function DiffViewer({
     <div className="diff-viewer">
       {files.map((file, index) => {
         const filePath = file.name
+        const binaryInfo = binaryFiles.get(filePath)
+        if (binaryInfo) {
+          return (
+            <BinaryFileDiff
+              key={`${filePath}-${index}`}
+              filePath={filePath}
+              info={binaryInfo}
+              viewed={viewedFiles.has(filePath)}
+              onViewedChange={onViewedChange}
+            />
+          )
+        }
         return (
           <FileDiffCard
             key={`${filePath}-${index}`}

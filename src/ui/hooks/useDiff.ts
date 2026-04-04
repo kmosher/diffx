@@ -1,10 +1,16 @@
 import { useState, useEffect } from 'react'
 
+export interface BinaryFileInfo {
+  path: string
+  type: 'added' | 'deleted' | 'changed'
+}
+
 interface DiffData {
   patch: string
   repoName: string
   branch: string
   customMode: boolean
+  binaryFiles: BinaryFileInfo[]
 }
 
 export interface DiffOptions {
@@ -36,6 +42,7 @@ export function useDiff(options: DiffOptions) {
     repoName: data?.repoName ?? '',
     branch: data?.branch ?? '',
     customMode: data?.customMode ?? false,
+    binaryFiles: data?.binaryFiles ?? [],
     loading,
     error,
   }

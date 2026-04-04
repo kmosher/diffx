@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName } from './git.js'
+import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName, getFileContent, isImageFile } from './git.js'
 import { loadSettings, saveSettings } from './settings.js'
 import { InMemoryCommentStore } from './comments.js'
 import type { CommentStore } from './comments.js'
@@ -15,6 +15,54 @@ const MIME_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.avif': 'image/avif',
+}
+
+export interface BinaryFileInfo {
+  path: string
+  type: 'added' | 'deleted' | 'changed'
+}
+
+function parseBinaryFiles(patch: string): BinaryFileInfo[] {
+  const binaryFiles: BinaryFileInfo[] = []
+  const lines = patch.split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (!line.startsWith('Binary files ') || !line.includes(' differ')) continue
+
+    // Find the file path from the preceding diff --git line
+    let filePath = ''
+    for (let j = i - 1; j >= 0; j--) {
+      const match = lines[j].match(/^diff --git a\/.+ b\/(.+)$/)
+      if (match) {
+        filePath = match[1]
+        break
+      }
+    }
+    if (!filePath) continue
+
+    // Determine change type from surrounding lines
+    let changeType: BinaryFileInfo['type'] = 'changed'
+    for (let j = i - 1; j >= 0; j--) {
+      if (lines[j].startsWith('diff --git')) break
+      if (lines[j].startsWith('new file mode')) {
+        changeType = 'added'
+        break
+      }
+      if (lines[j].startsWith('deleted file mode')) {
+        changeType = 'deleted'
+        break
+      }
+    }
+
+    binaryFiles.push({ path: filePath, type: changeType })
+  }
+  return binaryFiles
 }
 
 export function createApp(clientDir: string, customDiffArgs?: string[], commentStore?: CommentStore) {
@@ -33,7 +81,25 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     }
     const repoName = getRepoName()
     const branch = getBranchName()
-    return c.json({ patch, repoName, branch, customMode: isCustomMode })
+    const binaryFiles = parseBinaryFiles(patch)
+    return c.json({ patch, repoName, branch, customMode: isCustomMode, binaryFiles })
+  })
+
+  app.get('/api/file-content', (c) => {
+    const path = c.req.query('path')
+    const version = c.req.query('version') as 'old' | 'new'
+    if (!path || !version) {
+      return c.json({ error: 'Missing path or version' }, 400)
+    }
+    const content = getFileContent(path, version)
+    if (!content) {
+      return c.json({ error: 'File not found' }, 404)
+    }
+    const ext = extname(path)
+    const contentType = MIME_TYPES[ext] || 'application/octet-stream'
+    return new Response(content, {
+      headers: { 'Content-Type': contentType },
+    })
   })
 
   app.get('/api/settings', (c) => {

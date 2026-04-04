@@ -1,5 +1,6 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { parsePatchFiles } from '@pierre/diffs'
+import type { FileDiffMetadata } from '@pierre/diffs'
 import { useDiff } from './hooks/useDiff'
 import { useComments } from './hooks/useComments'
 import { useSettings } from './hooks/useSettings'
@@ -9,7 +10,7 @@ import { FileTree } from './components/FileTree'
 
 export function App() {
   const { settings, loaded, updateSettings } = useSettings()
-  const { patch, repoName, branch, customMode, loading, error } = useDiff({
+  const { patch, repoName, branch, customMode, binaryFiles, loading, error } = useDiff({
     staged: settings.staged,
     untracked: settings.untracked,
   })
@@ -23,11 +24,31 @@ export function App() {
     if (!patch) return []
     try {
       const parsed = parsePatchFiles(patch)
-      return parsed.flatMap((p) => p.files)
+      const parsedFiles = parsed.flatMap((p) => p.files)
+
+      // Add synthetic entries for binary files not already in parsed output
+      const existingNames = new Set(parsedFiles.map((f) => f.name))
+      for (const bf of binaryFiles) {
+        if (!existingNames.has(bf.path)) {
+          const syntheticFile: FileDiffMetadata = {
+            name: bf.path,
+            type: bf.type === 'added' ? 'new' : bf.type === 'deleted' ? 'deleted' : 'change',
+            hunks: [],
+            splitLineCount: 0,
+            unifiedLineCount: 0,
+            isPartial: true,
+            deletionLines: [],
+            additionLines: [],
+          }
+          parsedFiles.push(syntheticFile)
+        }
+      }
+
+      return parsedFiles
     } catch {
       return []
     }
-  }, [patch])
+  }, [patch, binaryFiles])
 
   const diffStats = useMemo(() => {
     if (!patch) return { additions: 0, deletions: 0 }
@@ -39,6 +60,14 @@ export function App() {
     }
     return { additions, deletions }
   }, [patch])
+
+  const binaryFileMap = useMemo(() => {
+    const map = new Map<string, (typeof binaryFiles)[number]>()
+    for (const bf of binaryFiles) {
+      map.set(bf.path, bf)
+    }
+    return map
+  }, [binaryFiles])
 
   const commentCounts = useMemo(() => {
     const counts: Record<string, number> = {}
@@ -115,6 +144,7 @@ export function App() {
             files={files}
             diffStyle={settings.diffStyle}
             viewedFiles={viewedFiles}
+            binaryFiles={binaryFileMap}
             onViewedChange={handleViewedChange}
             getAnnotationsForFile={getAnnotationsForFile}
             onAddComment={addComment}

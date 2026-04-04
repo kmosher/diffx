@@ -3,6 +3,45 @@ import { basename } from 'node:path'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+const IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.ico', '.avif',
+])
+
+export function isImageFile(filePath: string): boolean {
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  return IMAGE_EXTENSIONS.has(ext)
+}
+
+function isBinaryFile(absolutePath: string): boolean {
+  try {
+    const buffer = readFileSync(absolutePath)
+    const bytesToCheck = Math.min(buffer.length, 8192)
+    for (let i = 0; i < bytesToCheck; i++) {
+      if (buffer[i] === 0) return true
+    }
+    return false
+  } catch {
+    return true
+  }
+}
+
+export function getFileContent(filePath: string, version: 'old' | 'new'): Buffer | null {
+  const root = getRepoRoot()
+  if (version === 'new') {
+    try {
+      return readFileSync(join(root, filePath))
+    } catch {
+      return null
+    }
+  }
+  // old version: try staged first, then HEAD
+  try {
+    return execSync(`git show HEAD:${filePath}`, { maxBuffer: 50 * 1024 * 1024 })
+  } catch {
+    return null
+  }
+}
+
 export function isGitRepo(): boolean {
   try {
     execSync('git rev-parse --is-inside-work-tree', { stdio: 'pipe' })
@@ -70,22 +109,33 @@ function getUntrackedFilesDiff(): string {
   const patches: string[] = []
 
   for (const file of files) {
-    try {
-      const content = readFileSync(join(root, file), 'utf-8')
-      const lines = content.split('\n')
-      const diffLines = lines.map((line) => `+${line}`)
+    const absolutePath = join(root, file)
+    if (isBinaryFile(absolutePath)) {
       const patch = [
         `diff --git a/${file} b/${file}`,
         'new file mode 100644',
         'index 0000000..0000001',
-        '--- /dev/null',
-        `+++ b/${file}`,
-        `@@ -0,0 +1,${lines.length} @@`,
-        ...diffLines,
+        `Binary files /dev/null and b/${file} differ`,
       ].join('\n')
       patches.push(patch)
-    } catch {
-      // skip binary or unreadable files
+    } else {
+      try {
+        const content = readFileSync(absolutePath, 'utf-8')
+        const lines = content.split('\n')
+        const diffLines = lines.map((line) => `+${line}`)
+        const patch = [
+          `diff --git a/${file} b/${file}`,
+          'new file mode 100644',
+          'index 0000000..0000001',
+          '--- /dev/null',
+          `+++ b/${file}`,
+          `@@ -0,0 +1,${lines.length} @@`,
+          ...diffLines,
+        ].join('\n')
+        patches.push(patch)
+      } catch {
+        // skip unreadable files
+      }
     }
   }
 
