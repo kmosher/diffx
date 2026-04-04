@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import type { DiffLineAnnotation } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
 
-let nextId = 1
+let nextId = Date.now()
 
 export function useComments() {
   const [comments, setComments] = useState<ReviewComment[]>([])
@@ -15,6 +15,7 @@ export function useComments() {
         side,
         lineNumber,
         body,
+        createdAt: Date.now(),
       }
       setComments((prev) => [...prev, comment])
     },

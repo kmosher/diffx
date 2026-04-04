@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { join, extname } from 'node:path'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
-import { getGitDiff, getRepoName } from './git.js'
+import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName } from './git.js'
+import { loadSettings, saveSettings } from './settings.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -14,14 +15,32 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 }
 
-export function createApp(clientDir: string) {
+export function createApp(clientDir: string, customDiffArgs?: string[]) {
   const app = new Hono()
+  const isCustomMode = !!customDiffArgs
 
   app.get('/api/diff', (c) => {
-    const staged = c.req.query('staged') === 'true'
-    const patch = getGitDiff({ staged })
+    let patch: string
+    if (isCustomMode) {
+      patch = getCustomGitDiff(customDiffArgs)
+    } else {
+      const staged = c.req.query('staged') === 'true'
+      const untracked = c.req.query('untracked') === 'true'
+      patch = getGitDiff({ staged, untracked })
+    }
     const repoName = getRepoName()
-    return c.json({ patch, repoName })
+    const branch = getBranchName()
+    return c.json({ patch, repoName, branch, customMode: isCustomMode })
+  })
+
+  app.get('/api/settings', (c) => {
+    return c.json(loadSettings())
+  })
+
+  app.put('/api/settings', async (c) => {
+    const body = await c.req.json()
+    const settings = saveSettings(body)
+    return c.json(settings)
   })
 
   app.get('/*', async (c) => {
@@ -37,7 +56,6 @@ export function createApp(clientDir: string) {
         headers: { 'Content-Type': contentType },
       })
     } catch {
-      // SPA fallback: serve index.html for unmatched routes
       const indexContent = await readFile(join(clientDir, 'index.html'))
       return new Response(indexContent, {
         headers: { 'Content-Type': 'text/html' },
@@ -48,13 +66,19 @@ export function createApp(clientDir: string) {
   return app
 }
 
-export function startServer(options: { port: number; clientDir: string }) {
-  const app = createApp(options.clientDir)
+export function startServer(options: {
+  port: number
+  clientDir: string
+  customDiffArgs?: string[]
+}): Promise<{ port: number }> {
+  const app = createApp(options.clientDir, options.customDiffArgs)
 
-  const server = serve({
-    fetch: app.fetch,
-    port: options.port,
+  return new Promise((resolve) => {
+    const server = serve({
+      fetch: app.fetch,
+      port: options.port,
+    }, (info) => {
+      resolve({ port: info.port })
+    })
   })
-
-  return server
 }

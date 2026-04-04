@@ -5,18 +5,18 @@ import { FileDiffCard } from './FileDiffCard'
 interface DiffViewerProps {
   files: FileDiffMetadata[]
   diffStyle: 'split' | 'unified'
+  viewedFiles: Set<string>
+  onViewedChange: (filePath: string, viewed: boolean) => void
   getAnnotationsForFile: (filePath: string) => DiffLineAnnotation<ReviewComment>[]
   onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, body: string) => void
   onDeleteComment: (id: string) => void
 }
 
-function getFilePath(file: FileDiffMetadata): string {
-  return file.name
-}
-
 export function DiffViewer({
   files,
   diffStyle,
+  viewedFiles,
+  onViewedChange,
   getAnnotationsForFile,
   onAddComment,
   onDeleteComment,
@@ -32,14 +32,17 @@ export function DiffViewer({
   return (
     <div className="diff-viewer">
       {files.map((file, index) => {
-        const filePath = getFilePath(file)
+        const filePath = file.name
         return (
           <FileDiffCard
             key={`${filePath}-${index}`}
+            id={`file-${filePath}`}
             fileDiff={file}
             filePath={filePath}
             annotations={getAnnotationsForFile(filePath)}
             diffStyle={diffStyle}
+            viewed={viewedFiles.has(filePath)}
+            onViewedChange={onViewedChange}
             onAddComment={onAddComment}
             onDeleteComment={onDeleteComment}
           />

@@ -11,19 +11,25 @@ interface PendingComment {
 }
 
 interface FileDiffCardProps {
+  id?: string
   fileDiff: FileDiffMetadata
   filePath: string
   annotations: DiffLineAnnotation<ReviewComment>[]
   diffStyle: 'split' | 'unified'
+  viewed: boolean
+  onViewedChange: (filePath: string, viewed: boolean) => void
   onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, body: string) => void
   onDeleteComment: (id: string) => void
 }
 
 export function FileDiffCard({
+  id,
   fileDiff,
   filePath,
   annotations,
   diffStyle,
+  viewed,
+  onViewedChange,
   onAddComment,
   onDeleteComment,
 }: FileDiffCardProps) {
@@ -43,53 +49,75 @@ export function FileDiffCard({
   ]
 
   return (
-    <div className="file-diff-card">
-      <FileDiff<ReviewComment | { _pending: true }>
-        fileDiff={fileDiff}
-        options={{
-          diffStyle,
-          enableGutterUtility: true,
-          onGutterUtilityClick: (range) => {
-            setPending({
-              side: range.side ?? 'additions',
-              lineNumber: range.start,
-            })
-          },
-        }}
-        lineAnnotations={allAnnotations}
-        renderAnnotation={(annotation) => {
-          if ('_pending' in annotation.metadata) {
-            return (
-              <CommentForm
-                onSubmit={(body) => {
-                  onAddComment(filePath, pending!.side, pending!.lineNumber, body)
-                  setPending(null)
-                }}
-                onCancel={() => setPending(null)}
-              />
-            )
-          }
-          return (
-            <CommentBubble
-              comment={annotation.metadata as ReviewComment}
-              onDelete={onDeleteComment}
+    <div className={`file-diff-card ${viewed ? 'file-diff-viewed' : ''}`} id={id}>
+      {viewed ? (
+        <div className="file-diff-viewed-header">
+          <span className="file-diff-viewed-name">{filePath}</span>
+          <label className="viewed-label viewed-checked" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={viewed}
+              onChange={(e) => onViewedChange(filePath, e.target.checked)}
             />
-          )
-        }}
-        renderGutterUtility={(getHoveredLine) => (
-          <button
-            className="gutter-add-btn"
-            onClick={() => {
-              const line = getHoveredLine()
-              if (line) {
-                setPending({ side: line.side, lineNumber: line.lineNumber })
-              }
+            Viewed
+          </label>
+        </div>
+      ) : (
+        <>
+          <FileDiff<ReviewComment | { _pending: true }>
+            fileDiff={fileDiff}
+            options={{
+              diffStyle,
+              enableGutterUtility: true,
+              theme: { dark: 'github-dark', light: 'github-light' },
+              themeType: 'system',
             }}
-          >
-            +
-          </button>
-        )}
-      />
+            lineAnnotations={allAnnotations}
+            renderHeaderMetadata={() => (
+              <label className="viewed-label" onClick={(e) => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={viewed}
+                  onChange={(e) => onViewedChange(filePath, e.target.checked)}
+                />
+                Viewed
+              </label>
+            )}
+            renderAnnotation={(annotation) => {
+              if ('_pending' in annotation.metadata) {
+                return (
+                  <CommentForm
+                    onSubmit={(body) => {
+                      onAddComment(filePath, pending!.side, pending!.lineNumber, body)
+                      setPending(null)
+                    }}
+                    onCancel={() => setPending(null)}
+                  />
+                )
+              }
+              return (
+                <CommentBubble
+                  comment={annotation.metadata as ReviewComment}
+                  onDelete={onDeleteComment}
+                />
+              )
+            }}
+            renderGutterUtility={(getHoveredLine) => (
+              <button
+                className="gutter-add-btn"
+                onClick={() => {
+                  const line = getHoveredLine()
+                  if (line) {
+                    setPending({ side: line.side, lineNumber: line.lineNumber })
+                  }
+                }}
+              >
+                +
+              </button>
+            )}
+          />
+        </>
+      )}
     </div>
   )
 }

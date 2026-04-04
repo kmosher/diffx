@@ -1,10 +1,21 @@
 {
-  "name": "udiff",
+  "name": "diffx-cli",
   "version": "0.1.0",
+  "description": "Local code review tool for git diffs with a GitHub PR-like web UI",
   "type": "module",
+  "license": "MIT",
+  "keywords": [
+    "git",
+    "diff",
+    "code-review",
+    "cli"
+  ],
   "bin": {
-    "udiff": "./dist/cli.js"
+    "diffx": "./dist/cli.js"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "vite build && tsdown",
     "dev:client": "vite",
@@ -12,6 +23,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.14.1",
+    "get-port": "^7.2.0",
     "hono": "^4.7.6",
     "open": "^10.1.2"
   },
@@ -20,6 +32,7 @@
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^4.4.1",
+    "lucide-react": "^1.7.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "tsdown": "^0.12.5",

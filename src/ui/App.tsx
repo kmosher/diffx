@@ -1,15 +1,23 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { parsePatchFiles } from '@pierre/diffs'
 import { useDiff } from './hooks/useDiff'
 import { useComments } from './hooks/useComments'
+import { useSettings } from './hooks/useSettings'
 import { Toolbar } from './components/Toolbar'
 import { DiffViewer } from './components/DiffViewer'
+import { FileTree } from './components/FileTree'
 
 export function App() {
-  const { patch, repoName, loading, error } = useDiff()
+  const { settings, loaded, updateSettings } = useSettings()
+  const { patch, repoName, branch, customMode, loading, error } = useDiff({
+    staged: settings.staged,
+    untracked: settings.untracked,
+  })
   const { comments, addComment, removeComment, getAnnotationsForFile, copyAllComments } =
     useComments()
-  const [diffStyle, setDiffStyle] = useState<'split' | 'unified'>('split')
+  const [activeFile, setActiveFile] = useState<string | null>(null)
+  const [viewedFiles, setViewedFiles] = useState<Set<string>>(new Set())
+  const diffViewerRef = useRef<HTMLDivElement>(null)
 
   const files = useMemo(() => {
     if (!patch) return []
@@ -21,7 +29,46 @@ export function App() {
     }
   }, [patch])
 
-  if (loading) {
+  const diffStats = useMemo(() => {
+    if (!patch) return { additions: 0, deletions: 0 }
+    let additions = 0
+    let deletions = 0
+    for (const line of patch.split('\n')) {
+      if (line.startsWith('+') && !line.startsWith('+++')) additions++
+      else if (line.startsWith('-') && !line.startsWith('---')) deletions++
+    }
+    return { additions, deletions }
+  }, [patch])
+
+  const commentCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const c of comments) {
+      counts[c.filePath] = (counts[c.filePath] ?? 0) + 1
+    }
+    return counts
+  }, [comments])
+
+  const handleFileClick = useCallback((filePath: string) => {
+    setActiveFile(filePath)
+    const el = document.getElementById(`file-${filePath}`)
+    if (el) {
+      el.scrollIntoView({ block: 'start' })
+    }
+  }, [])
+
+  const handleViewedChange = useCallback((filePath: string, viewed: boolean) => {
+    setViewedFiles((prev) => {
+      const next = new Set(prev)
+      if (viewed) {
+        next.add(filePath)
+      } else {
+        next.delete(filePath)
+      }
+      return next
+    })
+  }, [])
+
+  if (!loaded || loading) {
     return (
       <div className="loading">
         <p>Loading diff...</p>
@@ -41,21 +88,40 @@ export function App() {
     <div className="app">
       <Toolbar
         repoName={repoName}
+        branch={branch}
         fileCount={files.length}
+        additions={diffStats.additions}
+        deletions={diffStats.deletions}
         commentCount={comments.length}
-        diffStyle={diffStyle}
-        onDiffStyleChange={setDiffStyle}
+        diffStyle={settings.diffStyle}
+        diffOptions={{ staged: settings.staged, untracked: settings.untracked }}
+        customMode={customMode}
+        onDiffStyleChange={(style) => updateSettings({ diffStyle: style })}
+        onDiffOptionsChange={(options) => updateSettings(options)}
         onCopyComments={copyAllComments}
       />
-      <main className="main">
-        <DiffViewer
-          files={files}
-          diffStyle={diffStyle}
-          getAnnotationsForFile={getAnnotationsForFile}
-          onAddComment={addComment}
-          onDeleteComment={removeComment}
-        />
-      </main>
+      <div className="app-body">
+        <aside className="sidebar">
+          <FileTree
+            files={files}
+            activeFile={activeFile}
+            commentCounts={commentCounts}
+            viewedFiles={viewedFiles}
+            onFileClick={handleFileClick}
+          />
+        </aside>
+        <main className="main" ref={diffViewerRef}>
+          <DiffViewer
+            files={files}
+            diffStyle={settings.diffStyle}
+            viewedFiles={viewedFiles}
+            onViewedChange={handleViewedChange}
+            getAnnotationsForFile={getAnnotationsForFile}
+            onAddComment={addComment}
+            onDeleteComment={removeComment}
+          />
+        </main>
+      </div>
     </div>
   )
 }

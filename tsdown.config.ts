@@ -5,5 +5,5 @@ export default defineConfig({
   format: 'esm',
   outDir: 'dist',
   clean: false,
-  external: ['open'],
+  external: ['open', 'get-port'],
 })

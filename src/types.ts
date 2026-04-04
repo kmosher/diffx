@@ -4,4 +4,5 @@ export interface ReviewComment {
   side: 'deletions' | 'additions'
   lineNumber: number
   body: string
+  createdAt: number
 }
