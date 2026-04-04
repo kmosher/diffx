@@ -1,0 +1,30 @@
+{
+  "name": "udiff",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "udiff": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "vite build && tsdown",
+    "dev:client": "vite",
+    "dev:server": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.1",
+    "hono": "^4.7.6",
+    "open": "^10.1.2"
+  },
+  "devDependencies": {
+    "@pierre/diffs": "^1.1.10",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "tsdown": "^0.12.5",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2"
+  }
+}

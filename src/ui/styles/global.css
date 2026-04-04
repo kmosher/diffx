@@ -1,0 +1,270 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg: #ffffff;
+  --bg-secondary: #f6f8fa;
+  --text: #1f2328;
+  --text-secondary: #656d76;
+  --border: #d0d7de;
+  --primary: #0969da;
+  --primary-hover: #0550ae;
+  --danger: #cf222e;
+  --success: #1a7f37;
+  --comment-bg: #fff8c5;
+  --comment-border: #d4a72c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --bg-secondary: #161b22;
+    --text: #e6edf3;
+    --text-secondary: #8b949e;
+    --border: #30363d;
+    --primary: #58a6ff;
+    --primary-hover: #79c0ff;
+    --danger: #f85149;
+    --success: #3fb950;
+    --comment-bg: #2d2000;
+    --comment-border: #9e6a03;
+  }
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial,
+    sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.app {
+  min-height: 100vh;
+}
+
+/* Toolbar */
+.toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.toolbar-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.toolbar-stat {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.toolbar-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.btn:hover {
+  background: var(--bg-secondary);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #ffffff;
+  border-color: var(--primary);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.btn-secondary {
+  background: transparent;
+}
+
+.btn-sm {
+  padding: 4px 12px;
+  font-size: 12px;
+  border-radius: 0;
+  border: none;
+}
+
+.btn-active {
+  background: var(--primary);
+  color: #ffffff;
+}
+
+/* Main content */
+.main {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* Diff viewer */
+.diff-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.file-diff-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+/* Gutter add button */
+.gutter-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.1s;
+}
+
+.gutter-add-btn:hover {
+  opacity: 1;
+}
+
+/* Comment form */
+.comment-form {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+}
+
+.comment-form textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.comment-form textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(9, 105, 218, 0.15);
+}
+
+.comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Comment bubble */
+.comment-bubble {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--comment-bg);
+  border-left: 3px solid var(--comment-border);
+}
+
+.comment-bubble-body {
+  flex: 1;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.comment-bubble-delete {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.comment-bubble-delete:hover {
+  background: var(--border);
+  color: var(--danger);
+}
+
+/* States */
+.loading,
+.error,
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 60vh;
+  font-size: 16px;
+  color: var(--text-secondary);
+}
+
+.error {
+  color: var(--danger);
+}
