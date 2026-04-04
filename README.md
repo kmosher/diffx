@@ -47,6 +47,7 @@ Examples:
 - **Viewed tracking** — Mark files as reviewed to track progress
 - **Staged / Untracked toggles** — Choose which changes to include
 - **Custom diff commands** — Pass any `git diff` arguments after `--`
+- **EditorConfig support** — Respects `.editorconfig` for per-file tab size
 - **Persistent settings** — Your preferences are saved across sessions
 
 ## Comment Output Format
