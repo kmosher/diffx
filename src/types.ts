@@ -3,6 +3,7 @@ export interface ReviewComment {
   filePath: string
   side: 'deletions' | 'additions'
   lineNumber: number
+  lineContent: string
   body: string
   createdAt: number
 }

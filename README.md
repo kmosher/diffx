@@ -41,7 +41,7 @@ Examples:
 - **Syntax highlighting** — Powered by Shiki with GitHub themes
 - **File tree** — Hierarchical file browser with search filter
 - **Inline comments** — Click the `+` button on any line to add a review comment
-- **Copy comments** — One-click copy all comments as structured markdown for AI coding agents
+- **Copy comments** — One-click copy all comments as structured XML for AI coding agents
 - **Viewed tracking** — Mark files as reviewed to track progress
 - **Staged / Untracked toggles** — Choose which changes to include
 - **Custom diff commands** — Pass any `git diff` arguments after `--`
@@ -49,19 +49,24 @@ Examples:
 
 ## Comment Output Format
 
-When you click "Copy comments", the output is formatted for AI agents:
+When you click "Copy comments", the output is structured XML optimized for AI agents:
 
-```markdown
-# Code Review Comments
-
-## src/utils/parser.ts
-
-### Line 42 (additions)
+```xml
+<code-review-comments>
+<file path="src/utils/parser.ts">
+<comment line="42">
+<code>+ const parsedToken = tokenize(input)</code>
 Rename `x` to `parsedToken` for clarity.
-
-### Line 15 (deletions)
+</comment>
+<comment line="15">
+<code>- if (input != null) {</code>
 This null check removal may cause a bug when `input` is undefined.
+</comment>
+</file>
+</code-review-comments>
 ```
+
+Each comment includes the commented code line with a `+`/`-` prefix indicating whether it's an added or removed line.
 
 ## License
 

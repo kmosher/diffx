@@ -8,7 +8,7 @@ interface DiffViewerProps {
   viewedFiles: Set<string>
   onViewedChange: (filePath: string, viewed: boolean) => void
   getAnnotationsForFile: (filePath: string) => DiffLineAnnotation<ReviewComment>[]
-  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, body: string) => void
+  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, lineContent: string, body: string) => void
   onDeleteComment: (id: string) => void
 }
 

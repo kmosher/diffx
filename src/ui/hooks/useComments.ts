@@ -8,12 +8,13 @@ export function useComments() {
   const [comments, setComments] = useState<ReviewComment[]>([])
 
   const addComment = useCallback(
-    (filePath: string, side: 'deletions' | 'additions', lineNumber: number, body: string) => {
+    (filePath: string, side: 'deletions' | 'additions', lineNumber: number, lineContent: string, body: string) => {
       const comment: ReviewComment = {
         id: String(nextId++),
         filePath,
         side,
         lineNumber,
+        lineContent,
         body,
         createdAt: Date.now(),
       }
@@ -40,14 +41,19 @@ export function useComments() {
       grouped.set(comment.filePath, list)
     }
 
-    const lines: string[] = ['# Code Review Comments', '']
+    const lines: string[] = ['<code-review-comments>']
     for (const [filePath, fileComments] of grouped) {
-      lines.push(`## ${filePath}`, '')
+      lines.push(`<file path="${filePath}">`)
       for (const comment of fileComments) {
-        lines.push(`### Line ${comment.lineNumber} (${comment.side})`, '')
-        lines.push(comment.body, '')
+        lines.push(`<comment line="${comment.lineNumber}">`)
+        const prefix = comment.side === 'additions' ? '+' : '-'
+        lines.push(`<code>${prefix} ${comment.lineContent}</code>`)
+        lines.push(comment.body)
+        lines.push('</comment>')
       }
+      lines.push('</file>')
     }
+    lines.push('</code-review-comments>')
 
     return lines.join('\n')
   }, [comments])

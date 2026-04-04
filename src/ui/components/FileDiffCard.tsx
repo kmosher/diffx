@@ -18,7 +18,7 @@ interface FileDiffCardProps {
   diffStyle: 'split' | 'unified'
   viewed: boolean
   onViewedChange: (filePath: string, viewed: boolean) => void
-  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, body: string) => void
+  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, lineContent: string, body: string) => void
   onDeleteComment: (id: string) => void
 }
 
@@ -34,6 +34,22 @@ export function FileDiffCard({
   onDeleteComment,
 }: FileDiffCardProps) {
   const [pending, setPending] = useState<PendingComment | null>(null)
+
+  const getLineContent = (side: AnnotationSide, lineNumber: number): string => {
+    const lines = side === 'additions' ? fileDiff.additionLines : fileDiff.deletionLines
+    const startKey = side === 'additions' ? 'additionStart' : 'deletionStart'
+    const countKey = side === 'additions' ? 'additionCount' : 'deletionCount'
+    const indexKey = side === 'additions' ? 'additionLineIndex' : 'deletionLineIndex'
+    for (const hunk of fileDiff.hunks) {
+      const start = hunk[startKey]
+      const count = hunk[countKey]
+      if (lineNumber >= start && lineNumber < start + count) {
+        const index = hunk[indexKey] + (lineNumber - start)
+        return lines[index] ?? ''
+      }
+    }
+    return ''
+  }
 
   const allAnnotations: DiffLineAnnotation<ReviewComment | { _pending: true }>[] = [
     ...annotations,
@@ -88,7 +104,8 @@ export function FileDiffCard({
                 return (
                   <CommentForm
                     onSubmit={(body) => {
-                      onAddComment(filePath, pending!.side, pending!.lineNumber, body)
+                      const lineContent = getLineContent(pending!.side, pending!.lineNumber)
+                      onAddComment(filePath, pending!.side, pending!.lineNumber, lineContent, body)
                       setPending(null)
                     }}
                     onCancel={() => setPending(null)}
