@@ -44,7 +44,7 @@
   },
   "devDependencies": {
     "@changesets/cli": "^2.30.0",
-    "@pierre/diffs": "^1.1.10",
+    "@pierre/diffs": "^1.1.11",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
     "@vitejs/plugin-react": "^6.0.1",
