@@ -9,6 +9,28 @@ import { useViewed } from './hooks/useViewed'
 import { Toolbar } from './components/Toolbar'
 import { DiffViewer } from './components/DiffViewer'
 import { FileTree } from './components/FileTree'
+import { CommentTracker } from './components/CommentTracker'
+
+function findCommentElement(commentId: string): Element | null {
+  const selector = `[data-comment-id="${commentId}"]`
+  // Check light DOM first
+  const direct = document.querySelector(selector)
+  if (direct) return direct
+  // Traverse shadow roots (annotations may be rendered inside web components)
+  function search(root: Document | ShadowRoot): Element | null {
+    const result = root.querySelector(selector)
+    if (result) return result
+    const hosts = root.querySelectorAll('*')
+    for (const el of hosts) {
+      if (el.shadowRoot) {
+        const found = search(el.shadowRoot)
+        if (found) return found
+      }
+    }
+    return null
+  }
+  return search(document)
+}
 
 export function App() {
   const { settings, loaded, updateSettings } = useSettings()
@@ -106,6 +128,21 @@ export function App() {
     }
   }, [])
 
+  const handleCommentClick = useCallback((comment: ReviewComment) => {
+    setActiveFile(comment.filePath)
+    const fileEl = document.getElementById(`file-${comment.filePath}`)
+    if (fileEl) {
+      fileEl.scrollIntoView({ block: 'start' })
+    }
+    // Try to scroll to the exact comment after the file scrolls into view
+    requestAnimationFrame(() => {
+      const found = findCommentElement(comment.id)
+      if (found) {
+        found.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    })
+  }, [])
+
   const handleViewedChange = useCallback((filePath: string, viewed: boolean) => {
     setViewed(filePath, viewed)
   }, [setViewed])
@@ -153,6 +190,10 @@ export function App() {
             viewedFiles={viewedFiles}
             untrackedFiles={untrackedSet}
             onFileClick={handleFileClick}
+          />
+          <CommentTracker
+            comments={comments}
+            onCommentClick={handleCommentClick}
           />
         </aside>
         <main className="main" ref={diffViewerRef}>

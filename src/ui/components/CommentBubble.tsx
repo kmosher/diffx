@@ -29,7 +29,7 @@ export function CommentBubble({ comment, onDelete }: CommentBubbleProps) {
   }, [])
 
   return (
-    <div className={`comment-bubble ${isResolved ? 'comment-resolved' : ''}`}>
+    <div className={`comment-bubble ${isResolved ? 'comment-resolved' : ''}`} data-comment-id={comment.id}>
       <div className="comment-bubble-header">
         <UserCircle size={18} className="comment-bubble-avatar" />
         <span className="comment-bubble-time">{timeAgo(comment.createdAt)}</span>
