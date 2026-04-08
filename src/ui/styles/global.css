@@ -808,7 +808,258 @@ body {
   align-items: center;
   gap: 3px;
   margin-left: auto;
-  color: var(--text-secondary);
   font-size: 12px;
   flex-shrink: 0;
+}
+
+.ft-comments-open {
+  color: #bf8700;
+}
+
+.ft-comments-resolved {
+  color: var(--success);
+}
+
+@media (prefers-color-scheme: dark) {
+  .ft-comments-open {
+    color: #d29922;
+  }
+}
+
+/* Toolbar comment progress */
+.toolbar-comment-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+.comment-progress-text {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.comment-progress-open {
+  color: #bf8700;
+  font-weight: 600;
+}
+
+.comment-progress-resolved {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.comment-progress-sep {
+  color: var(--text-secondary);
+}
+
+@media (prefers-color-scheme: dark) {
+  .comment-progress-open {
+    color: #d29922;
+  }
+}
+
+.comment-progress-bar {
+  width: 48px;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.comment-progress-fill {
+  height: 100%;
+  background: var(--success);
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
+/* Sidebar tabs */
+.sidebar-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.1s, border-color 0.1s;
+}
+
+.sidebar-tab:hover {
+  color: var(--text);
+}
+
+.sidebar-tab-active {
+  color: var(--text);
+  border-bottom-color: var(--primary);
+}
+
+.sidebar-tab-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 10px;
+  background: var(--border);
+  color: var(--text-secondary);
+}
+
+.sidebar-tab-badge-open {
+  background: #fff8c5;
+  color: #9a6700;
+}
+
+@media (prefers-color-scheme: dark) {
+  .sidebar-tab-badge-open {
+    background: #3d2e00;
+    color: #d29922;
+  }
+}
+
+/* Comment list panel */
+.cl {
+  font-size: 13px;
+}
+
+.cl-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.cl-filters {
+  display: flex;
+  gap: 2px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cl-filter-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.1s;
+}
+
+.cl-filter-btn:hover {
+  background: var(--border);
+}
+
+.cl-filter-active {
+  color: var(--text);
+  background: var(--bg);
+  border-color: var(--border);
+}
+
+.cl-list {
+  padding: 4px 0;
+}
+
+.cl-file-group {
+  margin-bottom: 2px;
+}
+
+.cl-file-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.cl-file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cl-file-count {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 10px;
+  background: var(--border);
+}
+
+.cl-item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px 6px 20px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.cl-item:hover {
+  background: var(--border);
+}
+
+.cl-item-resolved {
+  opacity: 0.6;
+}
+
+.cl-item-status {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.cl-status-open {
+  color: #bf8700;
+}
+
+.cl-status-resolved {
+  color: var(--success);
+}
+
+@media (prefers-color-scheme: dark) {
+  .cl-status-open {
+    color: #d29922;
+  }
+}
+
+.cl-item-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.cl-item-body {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.cl-item-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.cl-item-replies {
+  color: var(--text-secondary);
 }

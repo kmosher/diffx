@@ -9,6 +9,8 @@ interface ToolbarProps {
   additions: number
   deletions: number
   commentCount: number
+  openCount: number
+  resolvedCount: number
   diffStyle: 'split' | 'unified'
   diffOptions: DiffOptions
   defaultTabSize: number
@@ -26,6 +28,8 @@ export function Toolbar({
   additions,
   deletions,
   commentCount,
+  openCount,
+  resolvedCount,
   diffStyle,
   diffOptions,
   defaultTabSize,
@@ -72,6 +76,21 @@ export function Toolbar({
           {additions > 0 && <span className="stat-additions"> +{additions}</span>}
           {deletions > 0 && <span className="stat-deletions"> -{deletions}</span>}
         </span>
+        {commentCount > 0 && (
+          <div className="toolbar-comment-progress">
+            <span className="comment-progress-text">
+              {openCount > 0 && <span className="comment-progress-open">{openCount} open</span>}
+              {openCount > 0 && resolvedCount > 0 && <span className="comment-progress-sep"> · </span>}
+              {resolvedCount > 0 && <span className="comment-progress-resolved">{resolvedCount} resolved</span>}
+            </span>
+            <div className="comment-progress-bar">
+              <div
+                className="comment-progress-fill"
+                style={{ width: `${(resolvedCount / commentCount) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
       <div className="toolbar-right">
         <div className="toolbar-toggle">

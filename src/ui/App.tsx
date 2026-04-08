@@ -9,6 +9,8 @@ import { useViewed } from './hooks/useViewed'
 import { Toolbar } from './components/Toolbar'
 import { DiffViewer } from './components/DiffViewer'
 import { FileTree } from './components/FileTree'
+import type { FileCommentStatus } from './components/FileTree'
+import { CommentList } from './components/CommentList'
 
 export function App() {
   const { settings, loaded, updateSettings } = useSettings()
@@ -19,6 +21,7 @@ export function App() {
   const { comments, addComment, removeComment, copyAllComments } =
     useComments()
   const [activeFile, setActiveFile] = useState<string | null>(null)
+  const [sidebarTab, setSidebarTab] = useState<'files' | 'comments'>('files')
   const { viewedFiles, setViewed } = useViewed()
   const diffViewerRef = useRef<HTMLDivElement>(null)
 
@@ -73,12 +76,28 @@ export function App() {
     return map
   }, [binaryFiles])
 
+  const openCount = useMemo(() => comments.filter((c) => c.status === 'open').length, [comments])
+  const resolvedCount = useMemo(() => comments.filter((c) => c.status === 'resolved').length, [comments])
+
   const commentCounts = useMemo(() => {
     const counts: Record<string, number> = {}
     for (const c of comments) {
       counts[c.filePath] = (counts[c.filePath] ?? 0) + 1
     }
     return counts
+  }, [comments])
+
+  const commentStatusMap = useMemo(() => {
+    const map: Record<string, FileCommentStatus> = {}
+    for (const c of comments) {
+      if (!map[c.filePath]) {
+        map[c.filePath] = { open: 0, resolved: 0, total: 0 }
+      }
+      map[c.filePath].total++
+      if (c.status === 'open') map[c.filePath].open++
+      else map[c.filePath].resolved++
+    }
+    return map
   }, [comments])
 
   const fileAnnotationsMap = useMemo(() => {
@@ -135,6 +154,8 @@ export function App() {
         additions={diffStats.additions}
         deletions={diffStats.deletions}
         commentCount={comments.length}
+        openCount={openCount}
+        resolvedCount={resolvedCount}
         diffStyle={settings.diffStyle}
         diffOptions={{ staged: settings.staged, untracked: settings.untracked }}
         defaultTabSize={settings.defaultTabSize}
@@ -146,14 +167,42 @@ export function App() {
       />
       <div className="app-body">
         <aside className="sidebar">
-          <FileTree
-            files={files}
-            activeFile={activeFile}
-            commentCounts={commentCounts}
-            viewedFiles={viewedFiles}
-            untrackedFiles={untrackedSet}
-            onFileClick={handleFileClick}
-          />
+          <div className="sidebar-tabs">
+            <button
+              className={`sidebar-tab ${sidebarTab === 'files' ? 'sidebar-tab-active' : ''}`}
+              onClick={() => setSidebarTab('files')}
+            >
+              Files
+            </button>
+            <button
+              className={`sidebar-tab ${sidebarTab === 'comments' ? 'sidebar-tab-active' : ''}`}
+              onClick={() => setSidebarTab('comments')}
+            >
+              Comments
+              {openCount > 0 && (
+                <span className="sidebar-tab-badge sidebar-tab-badge-open">{openCount}</span>
+              )}
+            </button>
+          </div>
+          {sidebarTab === 'files' ? (
+            <FileTree
+              files={files}
+              activeFile={activeFile}
+              commentCounts={commentCounts}
+              commentStatusMap={commentStatusMap}
+              viewedFiles={viewedFiles}
+              untrackedFiles={untrackedSet}
+              onFileClick={handleFileClick}
+            />
+          ) : (
+            <CommentList
+              comments={comments}
+              onNavigate={(filePath) => {
+                handleFileClick(filePath)
+                setSidebarTab('files')
+              }}
+            />
+          )}
         </aside>
         <main className="main" ref={diffViewerRef}>
           <DiffViewer

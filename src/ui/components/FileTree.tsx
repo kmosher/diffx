@@ -11,14 +11,22 @@ import {
   FileCheck,
   FileQuestion,
   MessageSquare,
+  CheckCircle2,
   Search,
 } from 'lucide-react'
 import type { FileDiffMetadata } from '@pierre/diffs'
+
+export interface FileCommentStatus {
+  open: number
+  resolved: number
+  total: number
+}
 
 interface FileTreeProps {
   files: FileDiffMetadata[]
   activeFile: string | null
   commentCounts: Record<string, number>
+  commentStatusMap: Record<string, FileCommentStatus>
   viewedFiles: Set<string>
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -104,6 +112,7 @@ function TreeDir({
   node,
   activeFile,
   commentCounts,
+  commentStatusMap,
   viewedFiles,
   untrackedFiles,
   onFileClick,
@@ -113,6 +122,7 @@ function TreeDir({
   node: TreeNode
   activeFile: string | null
   commentCounts: Record<string, number>
+  commentStatusMap: Record<string, FileCommentStatus>
   viewedFiles: Set<string>
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -148,6 +158,7 @@ function TreeDir({
                 node={child}
                 activeFile={activeFile}
                 commentCounts={commentCounts}
+                commentStatusMap={commentStatusMap}
                 viewedFiles={viewedFiles}
                 untrackedFiles={untrackedFiles}
                 onFileClick={onFileClick}
@@ -159,7 +170,7 @@ function TreeDir({
                 key={child.path}
                 node={child}
                 activeFile={activeFile}
-                commentCount={commentCounts[child.file?.name ?? ''] ?? 0}
+                commentStatus={commentStatusMap[child.file?.name ?? '']}
                 viewed={viewedFiles.has(child.file?.name ?? '')}
                 untrackedFiles={untrackedFiles}
                 onFileClick={onFileClick}
@@ -176,7 +187,7 @@ function TreeDir({
 function TreeFile({
   node,
   activeFile,
-  commentCount,
+  commentStatus,
   viewed,
   untrackedFiles,
   onFileClick,
@@ -184,7 +195,7 @@ function TreeFile({
 }: {
   node: TreeNode
   activeFile: string | null
-  commentCount: number
+  commentStatus?: FileCommentStatus
   viewed: boolean
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -192,6 +203,8 @@ function TreeFile({
 }) {
   const filePath = node.file?.name ?? node.path
   const isActive = activeFile === filePath
+  const hasComments = commentStatus && commentStatus.total > 0
+  const allResolved = hasComments && commentStatus.open === 0
 
   return (
     <li>
@@ -203,10 +216,14 @@ function TreeFile({
       >
         {getFileIcon(node.file, viewed, untrackedFiles)}
         <span className="ft-file-name">{node.name}</span>
-        {commentCount > 0 && (
-          <span className="ft-comment-count">
-            <MessageSquare size={14} />
-            {commentCount}
+        {hasComments && (
+          <span className={`ft-comment-count ${allResolved ? 'ft-comments-resolved' : 'ft-comments-open'}`}>
+            {allResolved ? (
+              <CheckCircle2 size={14} />
+            ) : (
+              <MessageSquare size={14} />
+            )}
+            {allResolved ? commentStatus.total : commentStatus.open}
           </span>
         )}
       </div>
@@ -214,7 +231,7 @@ function TreeFile({
   )
 }
 
-export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrackedFiles, onFileClick }: FileTreeProps) {
+export function FileTree({ files, activeFile, commentCounts, commentStatusMap, viewedFiles, untrackedFiles, onFileClick }: FileTreeProps) {
   const [filter, setFilter] = useState('')
 
   const filteredFiles = useMemo(() => {
@@ -247,6 +264,7 @@ export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrac
               node={node}
               activeFile={activeFile}
               commentCounts={commentCounts}
+              commentStatusMap={commentStatusMap}
               viewedFiles={viewedFiles}
               untrackedFiles={untrackedFiles}
               onFileClick={onFileClick}
@@ -258,7 +276,7 @@ export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrac
               key={node.path}
               node={node}
               activeFile={activeFile}
-              commentCount={commentCounts[node.file?.name ?? ''] ?? 0}
+              commentStatus={commentStatusMap[node.file?.name ?? '']}
               viewed={viewedFiles.has(node.file?.name ?? '')}
               untrackedFiles={untrackedFiles}
               onFileClick={onFileClick}
