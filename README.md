@@ -1,6 +1,6 @@
 # diffx
 
-A local code review tool designed for the coding agent workflow. Review AI-generated changes in a GitHub PR-like web UI, leave inline comments, then hand them back to your coding agent to fix.
+A local code review tool designed for the coding-agent workflow. Review AI-generated changes in a GitHub PR-like web UI, leave inline comments, then hand them back to your coding agent to fix — or have the agent watch your comments and respond as you write them.
 
 ![screenshot](https://raw.githubusercontent.com/wong2/diffx/main/screenshot.png)
 
@@ -18,7 +18,7 @@ Run in any git repository:
 diffx
 ```
 
-This starts a local server and opens your browser with a diff review UI.
+This starts a local server on a random available port and opens your browser with a diff review UI. The server stays up waiting for you to leave inline comments; when you're done, click **Done reviewing** in the toolbar (or kill the server with Ctrl+C).
 
 ### Options
 
@@ -26,66 +26,93 @@ This starts a local server and opens your browser with a diff review UI.
 diffx [options] [-- <git-diff-args>]
 
 Options:
-  -p, --port <port>   Server port (default: 3433)
-  --no-open           Don't auto-open browser
+  -p, --port <port>   Server port (default: random available)
+  --host <host>       Bind address (default: 127.0.0.1; pass 0.0.0.0 for LAN)
+  --no-open           Don't auto-open the browser
+  -v, --version       Show version
+  -h, --help          Show help
 
 Examples:
   diffx                          # Review working tree changes
-  diffx -p 8080                  # Use custom port
+  diffx -- --staged              # Only staged changes
   diffx -- HEAD~3                # Diff against 3 commits ago
   diffx -- main..HEAD            # Diff between branches
-  diffx -- --cached -- src/      # Staged changes in src/
+  diffx --host 0.0.0.0           # Allow other machines on the LAN to review
 ```
+
+### Session subcommands
+
+While a `diffx` server is running, the same binary works as a client for it (auto-discovered via a state file at `$CLAUDE_TMPDIR/diffx-state.json` or `~/.diffx/state-<sha1(cwd)>.json`):
+
+```
+diffx state                       # Print state JSON (port, pid, url, etc.)
+diffx comments [open|resolved|replied|all]
+                                  # List comments, optionally filtered
+diffx reply <id> <text...>        # Reply to a comment (tagged author: 'agent')
+diffx resolve <id>                # Mark a comment resolved
+diffx reopen <id>                 # Reopen a resolved comment
+diffx watch                       # Stream comment/reply/submitted events as JSON
+                                  # lines on stdout (exits 0 when the user clicks
+                                  # Done reviewing, 2 on disconnect, 130 on Ctrl+C)
+diffx wait-for-submit             # Block until the user clicks Done reviewing
+```
+
+`diffx watch` is the integration point for an agent that wants to respond to comments as the user writes them — each new comment or user reply emits one JSON line; the agent's own `diffx reply` calls don't echo back, so there's no self-feedback loop.
 
 ## Features
 
 - **Split / Unified view** — Toggle between side-by-side and inline diff
-- **Syntax highlighting** — Powered by Shiki with GitHub themes
-- **File tree** — Hierarchical file browser with search filter and file change-type icons
-- **Inline comments** — Click the `+` button on any line to add a review comment
-- **Comment replies** — AI agents can reply to comments via API, displayed with bot avatar in the UI
-- **Comment status tracker** — Sidebar widget showing open, replied, and resolved comment counts with click-to-navigate links
-- **Copy comments** — One-click copy all comments as structured XML for AI coding agents
+- **Syntax highlighting** — Powered by Shiki with GitHub themes; respects `.editorconfig` for per-file tab size
+- **File tree** — Hierarchical browser with search filter, collapsible sidebar, and file change-type icons
+- **Inline comments** — Click the `+` button on any line, or **drag the gutter** across multiple lines to comment on a range
+- **Conversation threads** — Reply to any comment from the browser. Agents reply via the `diffx reply` subcommand or the API; agent replies render with a bot avatar in violet, user replies in blue. Replying to a resolved comment auto-reopens it.
+- **Expandable context** — Once both file versions have loaded, you can expand unedited lines above, below, and between hunks. Contents are fetched lazily as each file scrolls into view; files over 5 MB require an explicit "Load anyway" opt-in.
+- **Comment status tracker** — Sidebar widget showing open / replied / resolved counts with click-to-navigate links
+- **Done reviewing** — Submit pulse fires when you're finished; a connected `diffx watch` watcher exits cleanly
+- **Copy comments** — One-click copy all comments as structured XML for an offline agent
 - **Image preview** — Side-by-side comparison for added, modified, and deleted images
 - **Viewed tracking** — Mark files as reviewed to track progress
-- **Staged / Untracked toggles** — Choose which changes to include
-- **Custom diff commands** — Pass any `git diff` arguments after `--`
-- **EditorConfig support** — Respects `.editorconfig` for per-file tab size
-- **Persistent settings** — Your preferences are saved across sessions
+- **Staged / Untracked toggles** — Choose which working-tree changes to include
+- **Custom diff commands** — Pass any `git diff` arguments after `--`; expansion still works for `HEAD~N`, `X..Y`, `X...Y`, two-ref, and `--staged` invocations
+- **Persistent settings** — Diff style, default tab size, browser choice, etc. saved across sessions
 
 ## Comment Output Format
 
-When you click "Copy comments", the output is structured XML optimized for AI agents:
+When you click "Copy comments", the output is structured XML optimized for an AI agent:
 
 ```xml
-<code-review-comments>
+<code-review-comments version="2">
 <file path="src/utils/parser.ts">
 <comment line="42">
 <code>+ const parsedToken = tokenize(input)</code>
 Rename `x` to `parsedToken` for clarity.
 </comment>
-<comment line="15">
-<code>- if (input != null) {</code>
-This null check removal may cause a bug when `input` is undefined.
+<comment line="15" endLine="18">
+<code>
+- if (input != null) {
+-   foo(input)
+-   bar(input)
+- }
+</code>
+This block is dead code after the refactor on line 9.
 </comment>
 </file>
 </code-review-comments>
 ```
 
-Each comment includes the commented code line with a `+`/`-` prefix indicating whether it's an added or removed line.
+Each comment includes the commented code with a `+`/`-` prefix indicating addition or deletion. Range comments emit one diff line per row inside `<code>`. The `version="2"` root attribute lets a consumer detect the current shape; the `<code>` payload is XML-escaped, so generics, JSX, and `&` survive intact.
 
-## Agent Skills
+## Agent skills
 
-Install the diffx skills to use diffx directly from your AI coding agent:
+Install the diffx skill to use diffx directly from your AI coding agent:
 
 ```bash
 npx skills add wong2/diffx
 ```
 
-The review workflow uses two commands:
+The skill is a single streaming entrypoint: **`/diffx-review`**. The agent launches `diffx` (which opens the browser tab and waits for your comments), attaches a `diffx watch` monitor, and processes each comment / user reply as it arrives. The session ends when you click **Done reviewing** in the toolbar.
 
-1. **`/diffx-start-review`** — Launches the diffx server and opens the browser. Review your changes and leave inline comments.
-2. **`/diffx-finish-review`** — The agent fetches all comments from the running diffx server via API, applies the requested changes, and marks each comment as resolved. The browser UI updates in real time as comments are resolved.
+If you'd rather work batch-style without an attached agent, just click **Copy** in the toolbar and paste the XML into a chat — every consumer that parses the format above will still work.
 
 ## License
 
