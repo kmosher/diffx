@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0
+
+### Minor Changes
+
+- 492421f: Expandable context — each file card now lets you expand unedited lines above, below, and between hunks once both file versions have loaded. Contents are fetched lazily as the file scrolls into view (200px rootMargin) via a new ref-aware `/api/file-text?path&ref` endpoint; `/api/diff` exposes the resolved `baseRef`/`headRef` so expansion works with arbitrary `git diff` argument shapes (`HEAD~N`, `X..Y`, `X...Y`, `X Y`, `--staged`). Files larger than 5 MB show a "Load anyway" opt-in instead of streaming the bytes by default.
+- 492421f: Multi-line range comments — drag the gutter `+` across several lines to comment on a span instead of a single row. Range comments persist as `lineNumber..endLine` and the copy-comments XML now carries an `endLine` attribute (root bumped to `version="2"`, content is XML-escaped). User replies from the browser — every comment bubble has a Reply button; user replies are tagged `author: 'user'` and auto-reopen the comment if it had been resolved. The CLI's launch output now says explicitly that diffx is _waiting_ for inline comments, and the wire event for replies carries `commentStatus` so a watching agent doesn't need to re-fetch to learn about auto-reopens.
+- 492421f: Session-aware CLI subcommands (`diffx state`, `comments`, `reply`, `resolve`, `reopen`, `watch`, `wait-for-submit`) let an attached agent process review comments as they arrive. The browser UI gains a "Done reviewing" Submit button that fires a one-shot SSE pulse to any waiting watcher. The `/diffx-start-review` + `/diffx-finish-review` skill pair is replaced by a single streaming `/diffx-review` skill.
+
 ## 0.12.1
 
 ### Patch Changes
