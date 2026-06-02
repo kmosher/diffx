@@ -216,6 +216,7 @@ export function App() {
             onAddComment={addComment}
             onDeleteComment={removeComment}
             onReplyComment={replyToComment}
+            onActiveFileChange={setActiveFile}
           />
         </main>
       </div>

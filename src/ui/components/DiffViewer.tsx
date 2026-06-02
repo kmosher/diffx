@@ -16,6 +16,7 @@ interface DiffViewerProps {
   onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, endLine: number, lineContent: string, body: string) => void
   onDeleteComment: (id: string) => void
   onReplyComment: (id: string, body: string) => void
+  onActiveFileChange?: (filePath: string | null) => void
 }
 
 export const DiffViewer = memo(
@@ -31,6 +32,7 @@ export const DiffViewer = memo(
       onAddComment,
       onDeleteComment,
       onReplyComment,
+      onActiveFileChange,
     },
     ref,
   ) {
@@ -94,6 +96,7 @@ export const DiffViewer = memo(
             onAddComment={onAddComment}
             onDeleteComment={onDeleteComment}
             onReplyComment={onReplyComment}
+            onActiveFileChange={onActiveFileChange}
           />
         )}
       </div>

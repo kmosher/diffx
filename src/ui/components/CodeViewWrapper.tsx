@@ -45,6 +45,12 @@ interface Props {
   ): void
   onDeleteComment(id: string): void
   onReplyComment(id: string, body: string): void
+  // Fires when the scroll position crosses into a different file's
+  // territory, used by the file tree to highlight the currently-visible
+  // file. Throttled to one call per animation frame and deduped against
+  // the last reported value, so listener side-effects (setState) don't
+  // tear during rapid scroll.
+  onActiveFileChange?(filePath: string | null): void
 }
 
 function getLineContent(
@@ -93,6 +99,7 @@ export const CodeViewWrapper = memo(
       onAddComment,
       onDeleteComment,
       onReplyComment,
+      onActiveFileChange,
     },
     ref,
   ) {
@@ -262,6 +269,40 @@ export const CodeViewWrapper = memo(
       },
     )
 
+    // Active-file tracking on scroll. Walk items, find the one whose top is
+    // <= scrollTop + activeOffset and is greatest — that's the file the user
+    // is currently looking at. rAF-throttled so we report at most once per
+    // frame; deduped against the last reported value so listener setState
+    // doesn't fire when scrolling within one file.
+    const activeOffset = 80 // px below viewport top where a header counts as "in view"
+    const lastActiveFileRef = useRef<string | null>(null)
+    const rafIdRef = useRef<number | null>(null)
+    const handleScroll = useStableCallback((scrollTop: number) => {
+      if (!onActiveFileChange) return
+      if (rafIdRef.current != null) return
+      rafIdRef.current = requestAnimationFrame(() => {
+        rafIdRef.current = null
+        // getTopForItem lives on the underlying CodeView instance, not on
+        // the React handle. May be undefined briefly during initial mount.
+        const instance = viewerRef.current?.getInstance()
+        if (!instance) return
+        let active: string | null = null
+        let bestTop = -Infinity
+        for (const file of files) {
+          const top = instance.getTopForItem(file.name)
+          if (top == null) continue
+          if (top <= scrollTop + activeOffset && top > bestTop) {
+            bestTop = top
+            active = file.name
+          }
+        }
+        if (active !== lastActiveFileRef.current) {
+          lastActiveFileRef.current = active
+          onActiveFileChange(active)
+        }
+      })
+    })
+
     const options: CodeViewOptions<Metadata> = useMemo(
       () => ({
         diffStyle,
@@ -288,6 +329,7 @@ export const CodeViewWrapper = memo(
         containerRef={scrollRef}
         items={items}
         options={options}
+        onScroll={handleScroll}
         renderAnnotation={renderAnnotation}
         renderHeaderPrefix={renderHeaderPrefix}
         className="codeview-surface"
