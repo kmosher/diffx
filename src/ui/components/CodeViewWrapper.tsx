@@ -97,6 +97,10 @@ export const CodeViewWrapper = memo(
     ref,
   ) {
     const viewerRef = useRef<CodeViewHandle<Metadata> | null>(null)
+    // The CodeView element is its own scroll container — overflow-y:auto in
+    // .codeview-surface CSS. CodeView reads scrollTop off whatever DOM node
+    // containerRef resolves to in order to drive virtualization.
+    const scrollRef = useRef<HTMLDivElement | null>(null)
     const [pending, setPending] = useState<DraftMetadata | null>(null)
 
     useImperativeHandle(
@@ -249,6 +253,7 @@ export const CodeViewWrapper = memo(
         ref={(v) => {
           viewerRef.current = v
         }}
+        containerRef={scrollRef}
         items={items}
         options={options}
         renderAnnotation={renderAnnotation}

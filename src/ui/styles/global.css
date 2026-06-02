@@ -337,14 +337,37 @@ body {
 .main {
     flex: 1;
     min-width: 0;
-    padding: 24px;
+    /* min-height:0 lets the child .codeview-surface own the scroll instead of
+       letting .main grow to fit. Without this the viewport scrolls the whole
+       page and CodeView's virtualization can't track scrollTop. */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* Diff viewer */
 .diff-viewer {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    flex: 1;
+    min-height: 0;
+}
+
+/* CodeView surface — owns the scroll for all text-file diffs. CodeView reads
+   scrollTop off this element (via containerRef) to drive virtualization. */
+.codeview-surface {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: clip;
+    overscroll-behavior: contain;
+    /* Stop scroll anchoring from fighting CodeView's own scroll restoration
+       when items mount/unmount during virtualized rendering. */
+    overflow-anchor: none;
+    will-change: scroll-position;
+    /* Skip layout/paint for off-screen content. */
+    contain: strict;
 }
 
 .file-diff-card {
