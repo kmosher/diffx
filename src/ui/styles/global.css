@@ -474,6 +474,97 @@ body {
     background: var(--bg-secondary);
 }
 
+/* Header metadata — file-status pill, +/- stats, comment count. Rendered
+ * via renderHeaderMetadata into the right side of each CodeView sticky header. */
+.codeview-header-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: 8px;
+}
+
+.cv-pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    line-height: 1.4;
+    border: 1px solid transparent;
+}
+
+.cv-pill.pill-added {
+    color: #1a7f37;
+    background: rgba(46, 160, 67, 0.12);
+    border-color: rgba(46, 160, 67, 0.3);
+}
+
+.cv-pill.pill-deleted {
+    color: #cf222e;
+    background: rgba(207, 34, 46, 0.12);
+    border-color: rgba(207, 34, 46, 0.3);
+}
+
+.cv-pill.pill-renamed {
+    color: #8250df;
+    background: rgba(130, 80, 223, 0.12);
+    border-color: rgba(130, 80, 223, 0.3);
+}
+
+.cv-pill.pill-modified {
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border-color: var(--border);
+}
+
+.cv-stat {
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.cv-add { color: #1a7f37; }
+.cv-del { color: #cf222e; }
+
+@media (prefers-color-scheme: dark) {
+    .cv-pill.pill-added { color: #3fb950; }
+    .cv-pill.pill-deleted { color: #ff7b72; }
+    .cv-pill.pill-renamed { color: #b392f0; }
+    .cv-add { color: #3fb950; }
+    .cv-del { color: #ff7b72; }
+}
+
+.cv-comments {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+/* Faint "+" icon on gutter hover. CodeView calls renderGutterUtility for
+ * every hover-target line; we render a low-opacity hint so users discover
+ * the click-to-comment affordance without it being visually noisy. */
+/* Per-file diff stats in the FileTree row */
+.ft-stats {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+}
+
+.ft-stat-add { color: #1a7f37; }
+.ft-stat-del { color: #cf222e; }
+
+@media (prefers-color-scheme: dark) {
+    .ft-stat-add { color: #3fb950; }
+    .ft-stat-del { color: #ff7b72; }
+}
+
 .viewed-checked {
     color: var(--success);
     border-color: var(--success);

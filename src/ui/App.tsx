@@ -62,7 +62,15 @@ export function App() {
         const oldFile: FileContents = { name: file.name, contents: entry.old.contents }
         const newFile: FileContents = { name: file.name, contents: entry.new.contents }
         try {
-          return parseDiffFromFile(oldFile, newFile)
+          const upgraded = parseDiffFromFile(oldFile, newFile)
+          // Belt-and-suspenders: if old/new contents end up identical (e.g. a
+          // ref/patch mismatch slipped through), the upgrade returns zero
+          // hunks and CodeView would render headers with empty bodies. Fall
+          // back to the patch-parsed file so something always shows.
+          if (!upgraded.hunks || upgraded.hunks.length === 0) {
+            return file
+          }
+          return upgraded
         } catch {
           return file
         }
@@ -92,15 +100,35 @@ export function App() {
     }
   }, [patch, binaryFiles, fileContents])
 
-  const diffStats = useMemo(() => {
-    if (!patch) return { additions: 0, deletions: 0 }
-    let additions = 0
-    let deletions = 0
+  // Per-file +/- counts derived from the patch text. We compute these here
+  // (not from FileDiffMetadata.hunks) because parseDiffFromFile-upgraded files
+  // produce hunks without +/- line counts. Walking the patch is O(n) once and
+  // shared by Toolbar totals, FileTree rows, and CodeView header metadata.
+  const { diffStats, fileStatsMap } = useMemo(() => {
+    if (!patch) return { diffStats: { additions: 0, deletions: 0 }, fileStatsMap: {} as Record<string, { additions: number; deletions: number }> }
+    const stats: Record<string, { additions: number; deletions: number }> = {}
+    let totalAdd = 0
+    let totalDel = 0
+    let current: { additions: number; deletions: number } | null = null
     for (const line of patch.split('\n')) {
-      if (line.startsWith('+') && !line.startsWith('+++')) additions++
-      else if (line.startsWith('-') && !line.startsWith('---')) deletions++
+      if (line.startsWith('diff --git ')) {
+        // "diff --git a/path b/path" — pull the new-side path
+        const match = line.match(/ b\/(.+)$/)
+        if (match) {
+          current = { additions: 0, deletions: 0 }
+          stats[match[1]] = current
+        } else {
+          current = null
+        }
+      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        if (current) current.additions++
+        totalAdd++
+      } else if (line.startsWith('-') && !line.startsWith('---')) {
+        if (current) current.deletions++
+        totalDel++
+      }
     }
-    return { additions, deletions }
+    return { diffStats: { additions: totalAdd, deletions: totalDel }, fileStatsMap: stats }
   }, [patch])
 
   const binaryFileMap = useMemo(() => {
@@ -190,13 +218,26 @@ export function App() {
             files={files}
             activeFile={activeFile}
             commentCounts={commentCounts}
+            fileStatsMap={fileStatsMap}
             viewedFiles={viewedFiles}
             untrackedFiles={untrackedSet}
             onFileClick={handleFileClick}
             collapsed={sidebarCollapsed}
             onToggleCollapse={() => setSidebarCollapsed((c) => !c)}
           />
-          {!sidebarCollapsed && <CommentTracker comments={comments} />}
+          {!sidebarCollapsed && (
+            <CommentTracker
+              comments={comments}
+              onJump={(comment) => {
+                setActiveFile(comment.filePath)
+                diffViewerRef.current?.scrollToLine(
+                  comment.filePath,
+                  comment.side,
+                  comment.lineNumber,
+                )
+              }}
+            />
+          )}
         </aside>
         <main className="main">
           <DiffViewer
@@ -211,6 +252,8 @@ export function App() {
             defaultTabSize={settings.defaultTabSize}
             viewedFiles={viewedFiles}
             binaryFiles={binaryFileMap}
+            commentCounts={commentCounts}
+            fileStatsMap={fileStatsMap}
             onViewedChange={handleViewedChange}
             fileAnnotationsMap={fileAnnotationsMap}
             onAddComment={addComment}

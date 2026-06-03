@@ -7,14 +7,12 @@ import type {
   FileDiffMetadata,
   AnnotationSide,
   SelectedLineRange,
+  SelectionSide,
 } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
 import { CommentForm } from './CommentForm'
 import { CommentBubble } from './CommentBubble'
 
-// Discriminated union on `_pending`. Persisted comments are `ReviewComment`s
-// straight from the server; the in-flight draft (only one at a time) carries
-// the gutter-selected range so we can reconstruct line content on submit.
 type DraftMetadata = {
   _pending: true
   itemId: string
@@ -24,8 +22,16 @@ type DraftMetadata = {
 }
 type Metadata = ReviewComment | DraftMetadata
 
+// Files whose +/- change count exceeds this start collapsed by default. Based
+// on patch-derived stats (NOT FileDiffMetadata.unifiedLineCount) because after
+// our parseDiffFromFile upgrade, unifiedLineCount is the full file's rendered
+// line count, not the diff size — which would collapse every moderately-sized
+// file regardless of whether the diff itself is large.
+const AUTO_COLLAPSE_CHANGE_THRESHOLD = 500
+
 export interface CodeViewWrapperHandle {
   scrollToFile(filePath: string): void
+  scrollToLine(filePath: string, side: SelectionSide, lineNumber: number): void
 }
 
 interface Props {
@@ -34,6 +40,8 @@ interface Props {
   defaultTabSize: number
   viewedFiles: Set<string>
   fileAnnotationsMap: Map<string, DiffLineAnnotation<ReviewComment>[]>
+  commentCounts: Record<string, number>
+  fileStatsMap: Record<string, { additions: number; deletions: number }>
   onViewedChange(filePath: string, viewed: boolean): void
   onAddComment(
     filePath: string,
@@ -87,6 +95,29 @@ function bumpVersion(item: CodeViewItem<Metadata>): number {
   return v + 1
 }
 
+// File change-type → short label. CodeView's FileDiffMetadata.type uses the
+// patch-parser's vocabulary; we squash rename-pure/rename-changed since the
+// distinction isn't useful at a glance.
+function fileTypeLabel(type: FileDiffMetadata['type']): { label: string; cls: string } {
+  switch (type) {
+    case 'new':
+      return { label: 'added', cls: 'pill-added' }
+    case 'deleted':
+      return { label: 'deleted', cls: 'pill-deleted' }
+    case 'rename-pure':
+    case 'rename-changed':
+      return { label: 'renamed', cls: 'pill-renamed' }
+    default:
+      return { label: 'modified', cls: 'pill-modified' }
+  }
+}
+
+// We can't rely on hunk.additionLines/deletionLines after the parseDiffFromFile
+// upgrade — that path returns hunks with zero +/- counts (the upgrade is for
+// expansion context, not stats). Counting from FileDiffMetadata.additionLines
+// (the array of strings) is wrong too: in full-file mode it's the entire new
+// file. So we hand stats in from the caller, computed off the patch text.
+
 export const CodeViewWrapper = memo(
   forwardRef<CodeViewWrapperHandle, Props>(function CodeViewWrapper(
     {
@@ -95,6 +126,8 @@ export const CodeViewWrapper = memo(
       defaultTabSize,
       viewedFiles,
       fileAnnotationsMap,
+      commentCounts,
+      fileStatsMap,
       onViewedChange,
       onAddComment,
       onDeleteComment,
@@ -104,9 +137,6 @@ export const CodeViewWrapper = memo(
     ref,
   ) {
     const viewerRef = useRef<CodeViewHandle<Metadata> | null>(null)
-    // The CodeView element is its own scroll container — overflow-y:auto in
-    // .codeview-surface CSS. CodeView reads scrollTop off whatever DOM node
-    // containerRef resolves to in order to drive virtualization.
     const scrollRef = useRef<HTMLDivElement | null>(null)
     const [pending, setPending] = useState<DraftMetadata | null>(null)
 
@@ -121,28 +151,36 @@ export const CodeViewWrapper = memo(
             behavior: 'smooth',
           })
         },
+        scrollToLine(filePath: string, side: SelectionSide, lineNumber: number) {
+          // Expand if collapsed — scrolling to a line inside a collapsed file
+          // would land on the (closed) header instead of the comment.
+          const viewer = viewerRef.current
+          if (!viewer) return
+          const item = viewer.getItem(filePath)
+          if (item?.type === 'diff' && item.collapsed) {
+            item.collapsed = false
+            item.version = bumpVersion(item)
+            viewer.updateItem(item)
+          }
+          viewer.scrollTo({
+            type: 'line',
+            id: filePath,
+            lineNumber,
+            side,
+            align: 'center',
+            behavior: 'smooth',
+          })
+        },
       }),
       [],
     )
 
-    // Uncontrolled mode: initialItems is computed once at mount; subsequent
-    // state changes (annotations, viewed, pending, collapse) are pushed
-    // through the viewer handle via updateItem with a bumped version.
-    // CodeView throws if updateItem is called on a controlled (items=...)
-    // surface — so we deliberately do NOT pass `items`.
     const initialItems = useMemo<CodeViewItem<Metadata>[]>(
-      () => buildItems(files, fileAnnotationsMap, pending),
-      // Intentionally only depend on `files` — the rest gets pushed
-      // imperatively. If files change, the viewerKey on DiffViewer already
-      // remounts this whole component, so we'd be building from scratch.
+      () => buildItems(files, fileAnnotationsMap, pending, viewedFiles, fileStatsMap),
       // eslint-disable-next-line react-hooks/exhaustive-deps
       [files],
     )
 
-    // Push annotation changes (persisted comments + pending draft) into the
-    // viewer when fileAnnotationsMap or pending changes. Touch only the items
-    // whose annotation set actually changed; CodeView re-renders only the
-    // affected items because of the version bump.
     const lastAnnotationsRef = useRef<Map<string, DiffLineAnnotation<Metadata>[]>>(new Map())
     useEffect(() => {
       const viewer = viewerRef.current
@@ -160,9 +198,11 @@ export const CodeViewWrapper = memo(
       }
     }, [files, fileAnnotationsMap, pending])
 
-    // Push viewed-state changes: bump version on whichever file just toggled.
-    // The viewed flag is read inside renderHeaderPrefix's closure, so the
-    // version bump is just a signal to "re-run renderHeaderPrefix for this item."
+    // Viewed-state changes drive two things: re-render the header (chevron +
+    // checkbox + collapsed-state) and auto-collapse the file. We treat
+    // "marked viewed" as a strong signal that the user is done with this file,
+    // so we collapse it; un-viewing re-expands. Header re-renders unconditionally
+    // for any viewed-toggle since renderHeaderPrefix reads viewedFiles via closure.
     const lastViewedRef = useRef<Set<string>>(new Set())
     useEffect(() => {
       const viewer = viewerRef.current
@@ -175,11 +215,54 @@ export const CodeViewWrapper = memo(
         if (before === after) continue
         const item = viewer.getItem(file.name)
         if (!item || item.type !== 'diff') continue
+        // Auto-collapse on viewed, auto-expand on un-viewed. The user can
+        // still manually re-expand with the chevron after marking viewed.
+        item.collapsed = after
         item.version = bumpVersion(item)
         viewer.updateItem(item)
       }
       lastViewedRef.current = new Set(next)
     }, [files, viewedFiles])
+
+    // Push comment-count changes into header metadata. We bump version for
+    // any file whose count changed so renderHeaderMetadata re-runs.
+    const lastCountsRef = useRef<Record<string, number>>({})
+    useEffect(() => {
+      const viewer = viewerRef.current
+      if (!viewer) return
+      const prev = lastCountsRef.current
+      for (const file of files) {
+        const before = prev[file.name] ?? 0
+        const after = commentCounts[file.name] ?? 0
+        if (before === after) continue
+        const item = viewer.getItem(file.name)
+        if (!item || item.type !== 'diff') continue
+        item.version = bumpVersion(item)
+        viewer.updateItem(item)
+      }
+      lastCountsRef.current = commentCounts
+    }, [files, commentCounts])
+
+    // Same idea for stats: bump version if a file's stats change so the
+    // metadata cell rerenders. In practice stats don't change for a given
+    // diff identity (the viewerKey remount catches identity changes), but
+    // this keeps the data path consistent.
+    const lastStatsRef = useRef<Record<string, { additions: number; deletions: number }>>({})
+    useEffect(() => {
+      const viewer = viewerRef.current
+      if (!viewer) return
+      const prev = lastStatsRef.current
+      for (const file of files) {
+        const a = prev[file.name]
+        const b = fileStatsMap[file.name]
+        if (a?.additions === b?.additions && a?.deletions === b?.deletions) continue
+        const item = viewer.getItem(file.name)
+        if (!item || item.type !== 'diff') continue
+        item.version = bumpVersion(item)
+        viewer.updateItem(item)
+      }
+      lastStatsRef.current = fileStatsMap
+    }, [files, fileStatsMap])
 
     const handleGutterClick = useStableCallback(
       (
@@ -187,12 +270,9 @@ export const CodeViewWrapper = memo(
         context: { item: CodeViewItem<Metadata> },
       ) => {
         if (context.item.type !== 'diff') return
-        // Don't clobber an in-progress comment form — the user may have typed text.
         if (pending) return
         const side = range.endSide ?? range.side
         if (!side) return
-        // Cross-side drag on a split diff: each side has its own line-number
-        // coordinate space, no single span possible.
         if (range.side && range.endSide && range.side !== range.endSide) return
         setPending({
           _pending: true,
@@ -245,9 +325,6 @@ export const CodeViewWrapper = memo(
       },
     )
 
-    // Imperatively toggle item.collapsed on the viewer. Bumping item.version
-    // tells CodeView to re-render this single item without rebuilding the
-    // whole items array.
     const handleToggleCollapse = useStableCallback((itemId: string) => {
       const viewer = viewerRef.current
       if (!viewer) return
@@ -278,7 +355,6 @@ export const CodeViewWrapper = memo(
                 handleToggleCollapse(item.id)
               }}
             >
-              {/* Unicode chevron-right; rotates 90deg when expanded via CSS */}
               <span className={`chevron ${item.collapsed ? '' : 'chevron-down'}`}>›</span>
             </button>
             <label
@@ -297,12 +373,30 @@ export const CodeViewWrapper = memo(
       },
     )
 
-    // Active-file tracking on scroll. Walk items, find the one whose top is
-    // <= scrollTop + activeOffset and is greatest — that's the file the user
-    // is currently looking at. rAF-throttled so we report at most once per
-    // frame; deduped against the last reported value so listener setState
-    // doesn't fire when scrolling within one file.
-    const activeOffset = 80 // px below viewport top where a header counts as "in view"
+    const renderHeaderMetadata = useStableCallback(
+      (item: CodeViewItem<Metadata>) => {
+        if (item.type !== 'diff') return null
+        const { label, cls } = fileTypeLabel(item.fileDiff.type)
+        const stats = fileStatsMap[item.id]
+        const additions = stats?.additions ?? 0
+        const deletions = stats?.deletions ?? 0
+        const count = commentCounts[item.id] ?? 0
+        return (
+          <div className="codeview-header-meta">
+            <span className={`cv-pill ${cls}`}>{label}</span>
+            {additions > 0 && <span className="cv-stat cv-add">+{additions}</span>}
+            {deletions > 0 && <span className="cv-stat cv-del">−{deletions}</span>}
+            {count > 0 && (
+              <span className="cv-stat cv-comments" title={`${count} comment${count === 1 ? '' : 's'}`}>
+                💬 {count}
+              </span>
+            )}
+          </div>
+        )
+      },
+    )
+
+    const activeOffset = 80
     const lastActiveFileRef = useRef<string | null>(null)
     const rafIdRef = useRef<number | null>(null)
     const handleScroll = useStableCallback((scrollTop: number) => {
@@ -310,8 +404,6 @@ export const CodeViewWrapper = memo(
       if (rafIdRef.current != null) return
       rafIdRef.current = requestAnimationFrame(() => {
         rafIdRef.current = null
-        // getTopForItem lives on the underlying CodeView instance, not on
-        // the React handle. May be undefined briefly during initial mount.
         const instance = viewerRef.current?.getInstance()
         if (!instance) return
         let active: string | null = null
@@ -340,10 +432,28 @@ export const CodeViewWrapper = memo(
         enableLineSelection: true,
         stickyHeaders: true,
         lineHoverHighlight: 'number' as const,
-        // Tab size moves from per-file to global. Per-file via unsafeCSS no
-        // longer works because the CodeView surface is a single web component
-        // for all files. Revisit if per-language tab size matters in practice.
-        unsafeCSS: `:host { --diffs-tab-size: ${defaultTabSize}; }`,
+        // Tab size + inverse-sticky shadow. The @container scroll-state trick
+        // (cribbed from diffshub) only paints the hairline under a header when
+        // it's *actually stuck* at the top — much quieter than always-on.
+        unsafeCSS: `
+          :host { --diffs-tab-size: ${defaultTabSize}; }
+          [data-diffs-header] {
+            container-type: scroll-state;
+            container-name: diffx-sticky-header;
+          }
+          @container diffx-sticky-header scroll-state(stuck: top) {
+            [data-diffs-header]::after {
+              position: absolute;
+              bottom: -1px;
+              left: 0;
+              width: 100%;
+              height: 1px;
+              content: '';
+              background-color: var(--color-border-opaque, currentColor);
+              opacity: 0.4;
+            }
+          }
+        `,
         onGutterUtilityClick: (range, context) => handleGutterClick(range, context),
       }),
       [diffStyle, defaultTabSize, handleGutterClick],
@@ -360,6 +470,7 @@ export const CodeViewWrapper = memo(
         onScroll={handleScroll}
         renderAnnotation={renderAnnotation}
         renderHeaderPrefix={renderHeaderPrefix}
+        renderHeaderMetadata={renderHeaderMetadata}
         className="codeview-surface"
       />
     )
@@ -370,18 +481,29 @@ function buildItems(
   files: FileDiffMetadata[],
   fileAnnotationsMap: Map<string, DiffLineAnnotation<ReviewComment>[]>,
   pending: DraftMetadata | null,
+  viewedFiles: Set<string>,
+  fileStatsMap: Record<string, { additions: number; deletions: number }>,
 ): CodeViewItem<Metadata>[] {
-  return files.map((fileDiff) => ({
-    id: fileDiff.name,
-    type: 'diff' as const,
-    fileDiff,
-    annotations: mergeAnnotations(
-      fileAnnotationsMap.get(fileDiff.name) ?? [],
-      pending,
-      fileDiff.name,
-    ),
-    version: 0,
-  }))
+  return files.map((fileDiff) => {
+    const stats = fileStatsMap[fileDiff.name]
+    const changeCount = (stats?.additions ?? 0) + (stats?.deletions ?? 0)
+    // Initial collapse: viewed files (carryover from a prior session) and
+    // very large diffs. Manual chevron toggle still overrides.
+    const collapsed =
+      viewedFiles.has(fileDiff.name) || changeCount > AUTO_COLLAPSE_CHANGE_THRESHOLD
+    return {
+      id: fileDiff.name,
+      type: 'diff' as const,
+      fileDiff,
+      collapsed,
+      annotations: mergeAnnotations(
+        fileAnnotationsMap.get(fileDiff.name) ?? [],
+        pending,
+        fileDiff.name,
+      ),
+      version: 0,
+    }
+  })
 }
 
 function mergeAnnotations(
@@ -407,8 +529,6 @@ function annotationsEqual(
   if (a === b) return true
   if (!a || a.length !== b.length) return false
   for (let i = 0; i < a.length; i++) {
-    // Shallow equal: metadata identity is enough — persisted comments come
-    // through react-query (stable ref per id) and the draft is its own ref.
     if (a[i].metadata !== b[i].metadata) return false
     if (a[i].lineNumber !== b[i].lineNumber) return false
     if (a[i].side !== b[i].side) return false

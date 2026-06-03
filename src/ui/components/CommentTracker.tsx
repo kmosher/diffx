@@ -9,6 +9,7 @@ import { timeAgo, truncate, fileName } from '../utils'
 
 interface CommentTrackerProps {
   comments: ReviewComment[]
+  onJump?: (comment: ReviewComment) => void
 }
 
 type CommentStatus = 'open' | 'replied' | 'resolved'
@@ -42,7 +43,7 @@ function StatusBadge({ status }: { status: CommentStatus }) {
   }
 }
 
-export function CommentTracker({ comments }: CommentTrackerProps) {
+export function CommentTracker({ comments, onJump }: CommentTrackerProps) {
   if (comments.length === 0) return null
 
   const sorted = [...comments].sort((a, b) => b.createdAt - a.createdAt)
@@ -70,7 +71,16 @@ export function CommentTracker({ comments }: CommentTrackerProps) {
               key={comment.id}
               className={`ct-item ${status === 'resolved' ? 'ct-item-resolved' : ''}`}
             >
-              <a href={`#comment-${comment.id}`} className="ct-item-link">
+              <a
+                href={`#comment-${comment.id}`}
+                className="ct-item-link"
+                onClick={(e) => {
+                  if (onJump) {
+                    e.preventDefault()
+                    onJump(comment)
+                  }
+                }}
+              >
                 <div className="ct-item-header">
                   <StatusBadge status={status} />
                   <span className="ct-item-file" title={comment.filePath}>

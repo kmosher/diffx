@@ -21,6 +21,7 @@ interface FileTreeProps {
   files: FileDiffMetadata[]
   activeFile: string | null
   commentCounts: Record<string, number>
+  fileStatsMap: Record<string, { additions: number; deletions: number }>
   viewedFiles: Set<string>
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -108,6 +109,7 @@ function TreeDir({
   node,
   activeFile,
   commentCounts,
+  fileStatsMap,
   viewedFiles,
   untrackedFiles,
   onFileClick,
@@ -117,6 +119,7 @@ function TreeDir({
   node: TreeNode
   activeFile: string | null
   commentCounts: Record<string, number>
+  fileStatsMap: Record<string, { additions: number; deletions: number }>
   viewedFiles: Set<string>
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -152,6 +155,7 @@ function TreeDir({
                 node={child}
                 activeFile={activeFile}
                 commentCounts={commentCounts}
+                fileStatsMap={fileStatsMap}
                 viewedFiles={viewedFiles}
                 untrackedFiles={untrackedFiles}
                 onFileClick={onFileClick}
@@ -164,6 +168,7 @@ function TreeDir({
                 node={child}
                 activeFile={activeFile}
                 commentCount={commentCounts[child.file?.name ?? ''] ?? 0}
+                stats={fileStatsMap[child.file?.name ?? '']}
                 viewed={viewedFiles.has(child.file?.name ?? '')}
                 untrackedFiles={untrackedFiles}
                 onFileClick={onFileClick}
@@ -181,6 +186,7 @@ function TreeFile({
   node,
   activeFile,
   commentCount,
+  stats,
   viewed,
   untrackedFiles,
   onFileClick,
@@ -189,6 +195,7 @@ function TreeFile({
   node: TreeNode
   activeFile: string | null
   commentCount: number
+  stats: { additions: number; deletions: number } | undefined
   viewed: boolean
   untrackedFiles: Set<string>
   onFileClick: (filePath: string) => void
@@ -207,6 +214,12 @@ function TreeFile({
       >
         {getFileIcon(node.file, viewed, untrackedFiles)}
         <span className="ft-file-name">{node.name}</span>
+        {stats && (stats.additions > 0 || stats.deletions > 0) && (
+          <span className="ft-stats">
+            {stats.additions > 0 && <span className="ft-stat-add">+{stats.additions}</span>}
+            {stats.deletions > 0 && <span className="ft-stat-del">−{stats.deletions}</span>}
+          </span>
+        )}
         {commentCount > 0 && (
           <span className="ft-comment-count">
             <MessageSquare size={14} />
@@ -218,7 +231,7 @@ function TreeFile({
   )
 }
 
-export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrackedFiles, onFileClick, collapsed, onToggleCollapse }: FileTreeProps) {
+export function FileTree({ files, activeFile, commentCounts, fileStatsMap, viewedFiles, untrackedFiles, onFileClick, collapsed, onToggleCollapse }: FileTreeProps) {
   const [filter, setFilter] = useState('')
 
   const filteredFiles = useMemo(() => {
@@ -280,6 +293,7 @@ export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrac
               node={node}
               activeFile={activeFile}
               commentCounts={commentCounts}
+              fileStatsMap={fileStatsMap}
               viewedFiles={viewedFiles}
               untrackedFiles={untrackedFiles}
               onFileClick={onFileClick}
@@ -292,6 +306,7 @@ export function FileTree({ files, activeFile, commentCounts, viewedFiles, untrac
               node={node}
               activeFile={activeFile}
               commentCount={commentCounts[node.file?.name ?? ''] ?? 0}
+              stats={fileStatsMap[node.file?.name ?? '']}
               viewed={viewedFiles.has(node.file?.name ?? '')}
               untrackedFiles={untrackedFiles}
               onFileClick={onFileClick}
