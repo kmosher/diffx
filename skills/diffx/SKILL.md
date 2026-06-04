@@ -24,6 +24,8 @@ diffx -- main..HEAD        # current branch vs main
 
 Run with `run_in_background: true` so the server stays alive while the user reviews. diffx writes a state file at `$CLAUDE_TMPDIR/diffx-state.json` so the other subcommands auto-discover it.
 
+**Always pass `dangerouslyDisableSandbox: true` on this Bash call.** diffx spawns a child `open` process to launch the browser tab; the Claude Bash sandbox blocks that child even though `diffx` itself would run fine, and the tab silently fails to open ("browser-open helper exited with code 1"). Disabling the sandbox on the parent call lets the spawned `open` through.
+
 `diffx` automatically opens a new browser tab pointed at the local server. Once the tab is open, the server sits idle waiting for the user to leave inline comments — it is **not** doing any work in the background and will not proceed on its own. Activity resumes only when the user comments (you see it via `diffx watch`) or clicks **Done reviewing**.
 
 ## Step 2: Stream comment events (Monitor)

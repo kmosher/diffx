@@ -459,19 +459,22 @@ body {
     background: #ffebe9;
     font-size: 12px;
 }
-.editor-modal-textarea {
+.editor-modal-cm {
     flex: 1;
     min-height: 0;
-    border: none;
-    outline: none;
-    padding: 16px;
+    overflow: hidden;
+    background: var(--bg);
+}
+.editor-modal-cm .cm-editor {
+    height: 100%;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 13px;
+}
+.editor-modal-cm .cm-editor.cm-focused {
+    outline: none;
+}
+.editor-modal-cm .cm-scroller {
     line-height: 1.5;
-    background: var(--bg);
-    color: var(--text);
-    resize: none;
-    tab-size: 4;
 }
 @media (prefers-color-scheme: dark) {
     .editor-modal-error {

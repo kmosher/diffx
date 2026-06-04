@@ -1,4 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import CodeMirror, { type Extension } from '@uiw/react-codemirror'
+import { languages } from '@codemirror/language-data'
 
 interface Props {
   filePath: string
@@ -11,19 +13,54 @@ interface Props {
   onSave: (contents: string) => Promise<void>
 }
 
-// Modal text editor. Intentionally a plain textarea today — the long-term
-// plan is to drop in Monaco (or CodeMirror 6) at this seam without changing
-// the surrounding wiring. Keeping the interface minimal (initialContents in,
-// onSave out) means the swap is a one-component change.
+function useColorScheme(): 'light' | 'dark' {
+  const [scheme, setScheme] = useState<'light' | 'dark'>(() =>
+    typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light',
+  )
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-color-scheme: dark)')
+    const handler = (e: MediaQueryListEvent) => setScheme(e.matches ? 'dark' : 'light')
+    mql.addEventListener('change', handler)
+    return () => mql.removeEventListener('change', handler)
+  }, [])
+  return scheme
+}
+
 export function FileEditorModal({ filePath, initialContents, onClose, onSave }: Props) {
   const [contents, setContents] = useState(initialContents)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const taRef = useRef<HTMLTextAreaElement>(null)
+  const [langExt, setLangExt] = useState<Extension[]>([])
+  const scheme = useColorScheme()
+
+  const filename = useMemo(() => {
+    const slash = filePath.lastIndexOf('/')
+    return slash >= 0 ? filePath.slice(slash + 1) : filePath
+  }, [filePath])
 
   useEffect(() => {
-    taRef.current?.focus()
-  }, [])
+    let cancelled = false
+    const desc =
+      languages.find((l) => l.extensions.some((e) => filename.endsWith('.' + e))) ??
+      languages.find((l) => l.filename?.test(filename))
+    if (!desc) {
+      setLangExt([])
+      return
+    }
+    desc
+      .load()
+      .then((support) => {
+        if (!cancelled) setLangExt([support])
+      })
+      .catch(() => {
+        if (!cancelled) setLangExt([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [filename])
 
   const dirty = contents !== initialContents
 
@@ -56,7 +93,7 @@ export function FileEditorModal({ filePath, initialContents, onClose, onSave }: 
 
   return (
     <div className="editor-modal-backdrop" onClick={onClose}>
-      <div className="editor-modal" onClick={(e) => e.stopPropagation()}>
+      <div className="editor-modal" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
         <div className="editor-modal-header">
           <span className="editor-modal-path">{filePath}</span>
           {dirty && <span className="editor-modal-dirty">• unsaved</span>}
@@ -74,14 +111,22 @@ export function FileEditorModal({ filePath, initialContents, onClose, onSave }: 
           </button>
         </div>
         {err && <div className="editor-modal-error">{err}</div>}
-        <textarea
-          ref={taRef}
-          className="editor-modal-textarea"
-          value={contents}
-          onChange={(e) => setContents(e.target.value)}
-          onKeyDown={handleKeyDown}
-          spellCheck={false}
-        />
+        <div className="editor-modal-cm">
+          <CodeMirror
+            value={contents}
+            onChange={(v) => setContents(v)}
+            extensions={langExt}
+            theme={scheme}
+            height="100%"
+            autoFocus
+            basicSetup={{
+              lineNumbers: true,
+              highlightActiveLine: true,
+              foldGutter: true,
+              tabSize: 4,
+            }}
+          />
+        </div>
       </div>
     </div>
   )
