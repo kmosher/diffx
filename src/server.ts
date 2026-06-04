@@ -3,7 +3,7 @@ import { join, extname, resolve } from 'node:path'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
-import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName, getFileContent, getFileContentAtRef, resolveDiffRefs, WORKING_TREE_REF, getUntrackedFilePaths } from './git.js'
+import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName, getFileContent, getFileContentAtRef, resolveDiffRefs, WORKING_TREE_REF, getUntrackedFilePaths, writeWorkingTreeFile } from './git.js'
 import { loadSettings, saveSettings } from './settings.js'
 import { InMemoryCommentStore } from './comments.js'
 import type { CommentStore } from './comments.js'
@@ -205,6 +205,21 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     })
   })
 
+  app.put('/api/file-content', async (c) => {
+    // Write file contents back to the working tree. Used by in-browser edit
+    // mode — the agent picks up the change on its next diff poll.
+    const { path, contents } = await c.req.json()
+    if (typeof path !== 'string' || typeof contents !== 'string') {
+      return c.json({ error: 'path and contents required' }, 400)
+    }
+    if (!writeWorkingTreeFile(path, contents)) {
+      return c.json({ error: 'write failed (unsafe path or IO error)' }, 400)
+    }
+    // Force watchers to refetch the diff so the edit appears immediately.
+    void broadcast({ type: 'file-written', path })
+    return c.json({ ok: true })
+  })
+
   app.get('/api/settings', (c) => {
     return c.json(loadSettings())
   })
@@ -240,6 +255,16 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     // would otherwise silently store and confuse every downstream consumer.
     const lineNumber: number = body.lineNumber
     const endLine: number = Math.max(body.endLine ?? lineNumber, lineNumber)
+    // Pass through suggestion if shaped correctly. We validate just enough to
+     // avoid persisting garbage from a misbehaving client; full schema validation
+     // lives in the type system, not the wire.
+    const rawSuggestion = body.suggestion
+    const suggestion =
+      rawSuggestion &&
+      Array.isArray(rawSuggestion.newLines) &&
+      rawSuggestion.newLines.every((x: unknown) => typeof x === 'string')
+        ? { newLines: rawSuggestion.newLines as string[] }
+        : undefined
     const comment = {
       id: crypto.randomUUID(),
       filePath: body.filePath,
@@ -251,6 +276,7 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
       status: 'open' as const,
       createdAt: Date.now(),
       replies: [],
+      ...(suggestion ? { suggestion } : {}),
     }
     const created = await store.add(comment)
     void broadcast({ type: 'comment-added', comment: created })

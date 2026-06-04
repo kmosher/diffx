@@ -110,7 +110,7 @@ Install the diffx skill to use diffx directly from your AI coding agent:
 npx skills add wong2/diffx
 ```
 
-The skill is a single streaming entrypoint: **`/diffx-review`**. The agent launches `diffx` (which opens the browser tab and waits for your comments), attaches a `diffx watch` monitor, and processes each comment / user reply as it arrives. The session ends when you click **Done reviewing** in the toolbar.
+The skill is a single streaming entrypoint: **`/diffx`**. The agent launches `diffx` (which opens the browser tab and waits for your comments), attaches a `diffx watch` monitor, and processes each comment / user reply as it arrives. The session ends when you click **Done reviewing** in the toolbar.
 
 If you'd rather work batch-style without an attached agent, just click **Copy** in the toolbar and paste the XML into a chat — every consumer that parses the format above will still work.
 
@@ -128,13 +128,13 @@ pnpm link --global                             # exposes `diffx` on PATH from th
 
 `pnpm link --global` symlinks `<npm-global>/lib/node_modules/diffx-cli` to your checkout, so `which diffx` resolves to `dist/cli.mjs` in the working copy. Re-run `pnpm build` (or `pnpm dev:client` for live-reload during UI work) after editing.
 
-If you also want the `/diffx-review` skill to track your local source, link the SKILL.md into Claude Code's skills directory:
+If you also want the `/diffx` skill to track your local source, link the SKILL.md into Claude Code's skills directory:
 
 ```bash
-mkdir -p ~/.claude/skills/diffx-review
-ln skills/diffx-review/SKILL.md ~/.claude/skills/diffx-review/SKILL.md     # hardlink: edits visible at both paths
+mkdir -p ~/.claude/skills/diffx
+ln skills/diffx/SKILL.md ~/.claude/skills/diffx/SKILL.md     # hardlink: edits visible at both paths
 # or, more robust across git checkouts:
-ln -s "$PWD/skills/diffx-review/SKILL.md" ~/.claude/skills/diffx-review/SKILL.md
+ln -s "$PWD/skills/diffx/SKILL.md" ~/.claude/skills/diffx/SKILL.md
 ```
 
 The hardlink is what `npx skills add` lays down on first install — fastest path, but a git operation that rewrites the file via rename will break the link silently. The symlink survives every checkout (at the cost of a slightly less "vanilla" install).

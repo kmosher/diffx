@@ -397,6 +397,88 @@ body {
     transform: rotate(90deg);
 }
 
+.codeview-edit-btn {
+    margin-left: 8px;
+    padding: 2px 8px;
+    font-size: 11px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 4px;
+    cursor: pointer;
+}
+.codeview-edit-btn:hover {
+    background: var(--surface-2, rgba(0, 0, 0, 0.04));
+    color: var(--text);
+    border-color: var(--text-secondary);
+}
+
+.editor-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+}
+.editor-modal {
+    width: 100%;
+    max-width: 1100px;
+    height: 100%;
+    max-height: 90vh;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.4);
+}
+.editor-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+.editor-modal-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 600;
+}
+.editor-modal-dirty {
+    font-size: 12px;
+    color: var(--warning, #d97706);
+}
+.editor-modal-error {
+    padding: 8px 16px;
+    color: var(--danger, #d1242f);
+    background: #ffebe9;
+    font-size: 12px;
+}
+.editor-modal-textarea {
+    flex: 1;
+    min-height: 0;
+    border: none;
+    outline: none;
+    padding: 16px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--bg);
+    color: var(--text);
+    resize: none;
+    tab-size: 4;
+}
+@media (prefers-color-scheme: dark) {
+    .editor-modal-error {
+        background: #2d1214;
+    }
+}
+
 /* CodeView surface — owns the scroll for all text-file diffs. CodeView reads
    scrollTop off this element (via containerRef) to drive virtualization. */
 .codeview-surface {
@@ -795,6 +877,91 @@ body {
     font-size: 11px;
     color: var(--success);
     font-weight: 500;
+}
+
+.comment-suggestion {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface);
+}
+
+.comment-suggestion-label {
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--surface-2, #f6f8fa);
+    border-bottom: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.comment-suggestion-old,
+.comment-suggestion-new {
+    margin: 0;
+    padding: 4px 0;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.comment-suggestion-line {
+    padding: 0 8px;
+}
+
+.comment-suggestion-line.del {
+    background: #ffeef0;
+    color: #82071e;
+}
+
+.comment-suggestion-line.add {
+    background: #e6ffec;
+    color: #1a7f37;
+}
+
+@media (prefers-color-scheme: dark) {
+    .comment-suggestion-label {
+        background: #161b22;
+    }
+    .comment-suggestion-line.del {
+        background: rgba(248, 81, 73, 0.15);
+        color: #ffa198;
+    }
+    .comment-suggestion-line.add {
+        background: rgba(63, 185, 80, 0.15);
+        color: #7ee787;
+    }
+}
+
+.comment-suggestion-textarea {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace !important;
+    font-size: 12px !important;
+    background: var(--surface-2, #f6f8fa);
+}
+
+.btn-ghost {
+    background: transparent;
+    border: 1px solid transparent;
+    color: var(--text-secondary);
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.btn-ghost:hover {
+    background: var(--surface-2, rgba(0, 0, 0, 0.04));
+    color: var(--text);
+}
+
+.btn-ghost-active {
+    background: var(--surface-2, rgba(0, 0, 0, 0.06));
+    color: var(--text);
+    border-color: var(--border);
 }
 
 /* Comment replies */

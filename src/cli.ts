@@ -167,7 +167,7 @@ process.on('SIGTERM', () => {
 })
 process.on('exit', cleanup)
 
-const doneReviewingHint = `When you're done reviewing, click "Done reviewing" in the browser (or run /diffx-review in your terminal — Ctrl+C to abort).`
+const doneReviewingHint = `When you're done reviewing, click "Done reviewing" in the browser (or run /diffx in your terminal — Ctrl+C to abort).`
 
 // Common tail: tell the user where to point a browser and what to do when finished.
 // Always called, regardless of whether we tried to auto-open — the URL is also the

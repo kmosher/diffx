@@ -12,6 +12,7 @@ import { DiffViewer } from './components/DiffViewer'
 import type { CodeViewWrapperHandle } from './components/CodeViewWrapper'
 import { FileTree } from './components/FileTree'
 import { CommentTracker } from './components/CommentTracker'
+import { FileEditorModal } from './components/FileEditorModal'
 
 export function App() {
   const { settings, loaded, updateSettings } = useSettings()
@@ -32,6 +33,36 @@ export function App() {
   })
   const { viewedFiles, setViewed } = useViewed()
   const diffViewerRef = useRef<CodeViewWrapperHandle>(null)
+  // Active file editor: path + the working-tree contents loaded for editing.
+  // Loaded lazily on Edit click (small fetch) rather than carrying every
+  // file's contents through React state.
+  const [editingFile, setEditingFile] = useState<{ path: string; contents: string } | null>(null)
+
+  const handleEditFile = useCallback(async (filePath: string) => {
+    // Pull current working-tree contents fresh — fileContents bundled in
+    // /api/diff is whatever the diff thought 'new' was, which may diverge
+    // from disk if the agent rewrote since the last poll.
+    const res = await fetch(`/api/file-content?path=${encodeURIComponent(filePath)}&version=new`)
+    if (!res.ok) {
+      alert(`Could not load ${filePath}: HTTP ${res.status}`)
+      return
+    }
+    const text = await res.text()
+    setEditingFile({ path: filePath, contents: text })
+  }, [])
+
+  const handleSaveEditedFile = useCallback(async (contents: string) => {
+    if (!editingFile) return
+    const res = await fetch('/api/file-content', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: editingFile.path, contents }),
+    })
+    if (!res.ok) {
+      const msg = await res.text().catch(() => res.statusText)
+      throw new Error(`Save failed: ${msg}`)
+    }
+  }, [editingFile])
 
   useEffect(() => {
     try {
@@ -260,9 +291,18 @@ export function App() {
             onDeleteComment={removeComment}
             onReplyComment={replyToComment}
             onActiveFileChange={setActiveFile}
+            onEditFile={handleEditFile}
           />
         </main>
       </div>
+      {editingFile && (
+        <FileEditorModal
+          filePath={editingFile.path}
+          initialContents={editingFile.contents}
+          onClose={() => setEditingFile(null)}
+          onSave={handleSaveEditedFile}
+        />
+      )}
     </div>
   )
 }

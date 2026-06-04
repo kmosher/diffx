@@ -27,4 +27,11 @@ export interface ReviewComment {
   status: 'open' | 'resolved'
   createdAt: number
   replies: CommentReply[]
+  // Optional inline-suggestion payload. When present, the comment is a
+  // proposed rewrite: lineContent holds the original lines being replaced
+  // (one per row in [lineNumber, endLine]); suggestion.newLines is the
+  // replacement. Rendered to the agent as a ```suggestion fenced block.
+  suggestion?: {
+    newLines: string[]
+  }
 }

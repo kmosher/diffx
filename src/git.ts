@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { basename, join, resolve } from 'node:path'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { isSafePath } from './path.js'
 
 const IMAGE_EXTENSIONS = new Set([
@@ -22,6 +22,20 @@ function isBinaryFile(absolutePath: string): boolean {
     return false
   } catch {
     return true
+  }
+}
+
+// Write file contents back to the working tree. Returns true on success. The
+// caller is responsible for path validation; we re-check isSafePath here as
+// defense-in-depth so a bug elsewhere can't escape the repo root.
+export function writeWorkingTreeFile(filePath: string, contents: string): boolean {
+  const root = getRepoRoot()
+  if (!isSafePath(filePath, root)) return false
+  try {
+    writeFileSync(resolve(root, filePath), contents, 'utf8')
+    return true
+  } catch {
+    return false
   }
 }
 

@@ -39,7 +39,7 @@ export function useComments() {
   const { data: comments = [] } = useQuery({ queryKey: COMMENTS_KEY, queryFn: fetchComments, refetchInterval: 3000 })
 
   const addMutation = useMutation({
-    mutationFn: async (params: { filePath: string; side: 'deletions' | 'additions'; lineNumber: number; endLine: number; lineContent: string; body: string }) => {
+    mutationFn: async (params: { filePath: string; side: 'deletions' | 'additions'; lineNumber: number; endLine: number; lineContent: string; body: string; suggestion?: { newLines: string[] } }) => {
       const res = await fetch('/api/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -97,8 +97,16 @@ export function useComments() {
   })
 
   const addComment = useCallback(
-    (filePath: string, side: 'deletions' | 'additions', lineNumber: number, endLine: number, lineContent: string, body: string) => {
-      addMutation.mutate({ filePath, side, lineNumber, endLine, lineContent, body })
+    (
+      filePath: string,
+      side: 'deletions' | 'additions',
+      lineNumber: number,
+      endLine: number,
+      lineContent: string,
+      body: string,
+      suggestion?: { newLines: string[] },
+    ) => {
+      addMutation.mutate({ filePath, side, lineNumber, endLine, lineContent, body, suggestion })
     },
     [addMutation],
   )
@@ -147,7 +155,17 @@ export function useComments() {
       for (const comment of fileComments) {
         lines.push(`<comment${lineAttr(comment)}>`)
         lines.push(...renderCodeBlock(comment))
-        lines.push(xmlEscape(comment.body))
+        if (comment.body) lines.push(xmlEscape(comment.body))
+        if (comment.suggestion) {
+          // GitHub-style ```suggestion fence — the agent should treat
+          // the fenced content as the literal replacement for the lines
+          // [lineNumber, endLine] on this file.
+          lines.push('<suggestion>')
+          lines.push('```suggestion')
+          for (const ln of comment.suggestion.newLines) lines.push(xmlEscape(ln))
+          lines.push('```')
+          lines.push('</suggestion>')
+        }
         lines.push('</comment>')
       }
       lines.push('</file>')

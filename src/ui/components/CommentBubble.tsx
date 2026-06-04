@@ -49,7 +49,22 @@ export function CommentBubble({ comment, onDelete, onReply }: CommentBubbleProps
           </button>
         )}
       </div>
-      <div className="comment-bubble-body">{comment.body}</div>
+      {comment.body && <div className="comment-bubble-body">{comment.body}</div>}
+      {comment.suggestion && (
+        <div className="comment-suggestion" title="Suggested rewrite">
+          <div className="comment-suggestion-label">Suggested rewrite</div>
+          <pre className="comment-suggestion-old">
+            {comment.lineContent.split('\n').map((l, i) => (
+              <div key={`o-${i}`} className="comment-suggestion-line del">- {l || ' '}</div>
+            ))}
+          </pre>
+          <pre className="comment-suggestion-new">
+            {comment.suggestion.newLines.map((l, i) => (
+              <div key={`n-${i}`} className="comment-suggestion-line add">+ {l || ' '}</div>
+            ))}
+          </pre>
+        </div>
+      )}
       {comment.replies?.length > 0 && (
         <div className="comment-replies">
           {comment.replies.map((reply) => {

@@ -1,6 +1,6 @@
 ---
-name: diffx-review
-description: "End-to-end code review with diffx: launch the UI, stream the user's inline comments as they're written, reply/resolve in real time, finish when the user clicks Done reviewing. Use when the user invokes /diffx-review (or asks to review changes locally)."
+name: diffx
+description: "End-to-end code review with diffx: launch the UI, stream the user's inline comments as they're written, reply/resolve in real time, finish when the user clicks Done reviewing. Use when the user invokes /diffx (or asks to review changes locally)."
 user_invocable: true
 ---
 

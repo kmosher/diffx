@@ -50,10 +50,12 @@ interface Props {
     endLine: number,
     lineContent: string,
     body: string,
+    suggestion?: { newLines: string[] },
   ): void
   onDeleteComment(id: string): void
   onReplyComment(id: string, body: string): void
   onActiveFileChange?(filePath: string | null): void
+  onEditFile?(filePath: string): void
 }
 
 function getLineContent(
@@ -84,8 +86,14 @@ function getRangeContent(
 ): string {
   const out: string[] = []
   for (let n = startLine; n <= endLine; n++) {
-    const line = getLineContent(fileDiff, side, n)
-    if (line !== '') out.push(line)
+    // FileDiffMetadata.additionLines/deletionLines stores raw source lines
+    // with trailing newlines. If we join those with '\n' we end up with '\n\n'
+    // between every captured line — strip the trailing newline per row so
+    // the join produces clean single-newline separation. Skip truly empty
+    // rows (lineNumber outside any hunk → '') so we don't insert phantom blanks.
+    const raw = getLineContent(fileDiff, side, n)
+    if (raw === '') continue
+    out.push(raw.replace(/\n$/, ''))
   }
   return out.join('\n')
 }
@@ -133,6 +141,7 @@ export const CodeViewWrapper = memo(
       onDeleteComment,
       onReplyComment,
       onActiveFileChange,
+      onEditFile,
     },
     ref,
   ) {
@@ -264,6 +273,35 @@ export const CodeViewWrapper = memo(
       lastStatsRef.current = fileStatsMap
     }, [files, fileStatsMap])
 
+    // Track whether the user is mid-drag (line selection or gutter-utility
+    // selection). onLineEnter fires per-line during the drag, and we must
+    // NOT clear the selection while it's still being built — that would wipe
+    // every range the moment the cursor crossed a fresh line.
+    const isSelectingRef = useRef(false)
+
+    // Clear the lib's line selection when the user hovers a line outside the
+    // currently selected range. See the enableLineSelection comment in the
+    // options block for the why.
+    const handleLineEnter = useStableCallback(
+      (
+        props: { lineNumber: number },
+        ctx: { item: CodeViewItem<Metadata> },
+      ) => {
+        if (isSelectingRef.current) return
+        const viewer = viewerRef.current
+        if (!viewer || !ctx?.item) return
+        const sel = viewer.getSelectedLines()
+        if (!sel) return
+        if (sel.id !== ctx.item.id) {
+          viewer.clearSelectedLines()
+          return
+        }
+        const lo = Math.min(sel.range.start, sel.range.end)
+        const hi = Math.max(sel.range.start, sel.range.end)
+        if (props.lineNumber < lo || props.lineNumber > hi) viewer.clearSelectedLines()
+      },
+    )
+
     const handleGutterClick = useStableCallback(
       (
         range: SelectedLineRange,
@@ -271,9 +309,14 @@ export const CodeViewWrapper = memo(
       ) => {
         if (context.item.type !== 'diff') return
         if (pending) return
-        const side = range.endSide ?? range.side
-        if (!side) return
-        if (range.side && range.endSide && range.side !== range.endSide) return
+        // Pick whichever side the drag ended on; if neither is set (rare —
+        // typically only on synthetic events), fall back to additions since
+        // that's where reviewers comment the vast majority of the time. We
+        // do NOT bail on cross-side ranges: in split view the + button is
+        // anchored on one column (often deletions) while the coordinate-
+        // resolved drag endpoint lands on whichever column the cursor is in.
+        // Cross-side just means "started here, ended there" — commit to one.
+        const side = range.endSide ?? range.side ?? 'additions'
         setPending({
           _pending: true,
           itemId: context.item.id,
@@ -300,14 +343,28 @@ export const CodeViewWrapper = memo(
             <div>
               {rangeLabel && <div className="comment-range-label">{rangeLabel}</div>}
               <CommentForm
-                onSubmit={(body) => {
+                originalLines={getRangeContent(
+                  item.fileDiff,
+                  p.side,
+                  p.startLine,
+                  p.endLine,
+                )}
+                onSubmit={(body, suggestion) => {
                   const lineContent = getRangeContent(
                     item.fileDiff,
                     p.side,
                     p.startLine,
                     p.endLine,
                   )
-                  onAddComment(p.itemId, p.side, p.startLine, p.endLine, lineContent, body)
+                  onAddComment(
+                    p.itemId,
+                    p.side,
+                    p.startLine,
+                    p.endLine,
+                    lineContent,
+                    body,
+                    suggestion,
+                  )
                   setPending(null)
                 }}
                 onCancel={() => setPending(null)}
@@ -368,6 +425,20 @@ export const CodeViewWrapper = memo(
               />
               Viewed
             </label>
+            {onEditFile && (
+              <button
+                type="button"
+                className="codeview-edit-btn"
+                title="Edit file in browser"
+                onClick={(e) => {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onEditFile(item.id)
+                }}
+              >
+                Edit
+              </button>
+            )}
           </div>
         )
       },
@@ -429,6 +500,15 @@ export const CodeViewWrapper = memo(
         themeType: 'system' as const,
         theme: { dark: 'github-dark' as const, light: 'github-light' as const },
         enableGutterUtility: true,
+        // Line selection is on (so drag-to-select-range works visually), but
+        // we auto-clear the selection in onLineEnter when the user hovers a
+        // line outside the selected range. Without that clear, the lib glues
+        // the '+' button to the most recently clicked line and ignores
+        // subsequent hovers — users hover line Y, press where the '+' looks
+        // like it should be, but pointerdown lands on empty gutter and the
+        // lib starts a line-select drag instead of a gutter-utility drag, so
+        // no comment form opens. Clearing on hover-away restores the
+        // "+ tracks hover" behavior while preserving in-drag visualization.
         enableLineSelection: true,
         stickyHeaders: true,
         lineHoverHighlight: 'number' as const,
@@ -455,8 +535,23 @@ export const CodeViewWrapper = memo(
           }
         `,
         onGutterUtilityClick: (range, context) => handleGutterClick(range, context),
+        // Lib wraps onLineEnter via defineItemSharedCallback to inject a
+        // second arg {item}. The cast keeps us in lockstep with that shape.
+        onLineEnter: ((props: unknown, ctx: unknown) =>
+          handleLineEnter(
+            props as { lineNumber: number },
+            ctx as { item: CodeViewItem<Metadata> },
+          )) as never,
+        // Mid-drag the user is still building their selection; the auto-clear
+        // in onLineEnter would otherwise wipe each newly-crossed line.
+        onLineSelectionStart: () => {
+          isSelectingRef.current = true
+        },
+        onLineSelectionEnd: () => {
+          isSelectingRef.current = false
+        },
       }),
-      [diffStyle, defaultTabSize, handleGutterClick],
+      [diffStyle, defaultTabSize, handleGutterClick, handleLineEnter],
     )
 
     return (

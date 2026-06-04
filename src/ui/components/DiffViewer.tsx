@@ -15,10 +15,11 @@ interface DiffViewerProps {
   fileStatsMap: Record<string, { additions: number; deletions: number }>
   onViewedChange: (filePath: string, viewed: boolean) => void
   fileAnnotationsMap: Map<string, DiffLineAnnotation<ReviewComment>[]>
-  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, endLine: number, lineContent: string, body: string) => void
+  onAddComment: (filePath: string, side: AnnotationSide, lineNumber: number, endLine: number, lineContent: string, body: string, suggestion?: { newLines: string[] }) => void
   onDeleteComment: (id: string) => void
   onReplyComment: (id: string, body: string) => void
   onActiveFileChange?: (filePath: string | null) => void
+  onEditFile?: (filePath: string) => void
 }
 
 export const DiffViewer = memo(
@@ -37,6 +38,7 @@ export const DiffViewer = memo(
       onDeleteComment,
       onReplyComment,
       onActiveFileChange,
+      onEditFile,
     },
     ref,
   ) {
@@ -103,6 +105,7 @@ export const DiffViewer = memo(
             onDeleteComment={onDeleteComment}
             onReplyComment={onReplyComment}
             onActiveFileChange={onActiveFileChange}
+            onEditFile={onEditFile}
           />
         )}
       </div>

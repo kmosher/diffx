@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 
 export interface BinaryFileInfo {
   path: string
@@ -38,11 +38,10 @@ export function useDiff(options: DiffOptions) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
+  const load = useCallback(() => {
     setLoading(true)
     setError(null)
-
-    fetch(`/api/diff?staged=${options.staged}&untracked=${options.untracked}`)
+    return fetch(`/api/diff?staged=${options.staged}&untracked=${options.untracked}`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         return res.json()
@@ -51,6 +50,24 @@ export function useDiff(options: DiffOptions) {
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false))
   }, [options.staged, options.untracked])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  // SSE: re-fetch diff when a file is written from the browser editor.
+  // Filed-written events can also come from other sources later (e.g., agent
+  // writes); piggybacking on the existing event stream avoids a second channel.
+  useEffect(() => {
+    const es = new EventSource('/api/events')
+    es.addEventListener('message', (ev) => {
+      try {
+        const data = JSON.parse(ev.data)
+        if (data.type === 'file-written') void load()
+      } catch {}
+    })
+    return () => es.close()
+  }, [load])
 
   return {
     patch: data?.patch ?? null,
@@ -62,5 +79,6 @@ export function useDiff(options: DiffOptions) {
     fileContents: data?.fileContents ?? {},
     loading,
     error,
+    reload: load,
   }
 }
