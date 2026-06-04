@@ -1,5 +1,6 @@
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
+import { Prec } from '@codemirror/state'
 import type { Extension } from '@uiw/react-codemirror'
 
 // Colors lifted from @pierre/theme's pierre-light / pierre-dark Shiki themes
@@ -61,10 +62,11 @@ function build(p: Palette) {
 const lightStyle = build(light)
 const darkStyle = build(dark)
 
-// Returns the highlight extension matching the active scheme. We pick in JS
-// rather than relying on HighlightStyle's themeType because nothing in our
-// editor wiring sets EditorView.darkTheme, so themeType:'dark' would never
-// activate.
+// Returns the highlight extension matching the active scheme. Wrapped in
+// Prec.highest because @uiw/react-codemirror's built-in theme="dark" ships
+// its own oneDark syntaxHighlighting; without bumping precedence, our colors
+// would lose the CSS cascade race and the editor would display oneDark
+// tokens instead of the Pierre palette.
 export function pierreSyntaxHighlighting(scheme: 'light' | 'dark'): Extension {
-  return syntaxHighlighting(scheme === 'dark' ? darkStyle : lightStyle)
+  return Prec.highest(syntaxHighlighting(scheme === 'dark' ? darkStyle : lightStyle))
 }
