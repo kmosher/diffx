@@ -23,14 +23,11 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_deep_link::init())
         .setup(|app| {
-            let handle = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    open_review_window(&handle, &url);
-                }
-            });
-            // A deep link the app was cold-started with may not also arrive via
-            // `on_open_url`, so drain it here too. Label dedupe makes the overlap safe.
+            // A deep link the app was cold-started with arrives before the run
+            // loop; setup runs on the main thread pre-loop, so building here is
+            // safe. (We deliberately don't use the deep-link plugin's
+            // `on_open_url` callback: building a window inside it deadlocks, since
+            // the callback holds the event loop that `build()` needs to pump.)
             if let Ok(Some(urls)) = app.deep_link().get_current() {
                 for url in urls {
                     open_review_window(app.handle(), &url);
@@ -40,7 +37,17 @@ fn main() {
         })
         .build(tauri::generate_context!())
         .expect("error while building diffx desktop")
-        .run(|_app, _event| {});
+        .run(|app, event| {
+            // macOS delivers a deep link to an already-running app as `Opened`.
+            // This callback runs on the main thread *between* loop iterations, so
+            // it's reentrancy-safe for window creation — this is the path that
+            // turns the 2nd, 3rd, … review into its own window.
+            if let tauri::RunEvent::Opened { urls } = event {
+                for url in &urls {
+                    open_review_window(app, url);
+                }
+            }
+        });
 }
 
 // Open (or focus) a window for one review. Expects `diffx://review?url=<server>`
@@ -78,8 +85,11 @@ fn open_review_window(app: &tauri::AppHandle, deep_link: &url::Url) {
         return;
     }
 
-    let _ = WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
+    if let Err(e) = WebviewWindowBuilder::new(app, label, WebviewUrl::External(parsed))
         .title(title)
         .inner_size(1400.0, 900.0)
-        .build();
+        .build()
+    {
+        eprintln!("diffx: failed to open review window: {e}");
+    }
 }
