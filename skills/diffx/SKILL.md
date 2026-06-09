@@ -17,10 +17,31 @@ diffx [-- <git-diff-args>]
 No args reviews the working tree (staged + unstaged + untracked). Common variants:
 
 ```bash
-diffx -- --staged          # only staged
-diffx -- HEAD~3            # last 3 commits
-diffx -- main..HEAD        # current branch vs main
+diffx -- --staged                 # only staged
+diffx -- HEAD~3                    # last 3 commits
+diffx -- origin/main...HEAD        # this branch's own changes vs main (see below)
 ```
+
+### Picking the diff range for "review this branch"
+
+To review a branch's *own* changes, use **three-dot** `origin/main...HEAD`, not
+two-dot `main..HEAD`. The difference bites:
+
+- **Two-dot `A..B`** diffs the two *tip commits*. If the base ref has moved on
+  since the branch was cut (it usually has), every commit that landed on the base
+  meanwhile shows up — typically as a wall of phantom *deletions* in unrelated
+  files. This is the #1 way the diff comes out wrong.
+- **Three-dot `A...B`** diffs from the **merge-base**, so you get exactly what the
+  branch added, regardless of how far the base advanced. This is what you want.
+
+Also pick a **fresh** base ref: prefer `origin/main` (or `origin/master`) over
+local `main`/`master`, which is often tens of commits stale. When unsure which is
+the default branch, resolve it once: `git rev-parse --abbrev-ref origin/HEAD`
+(e.g. `origin/main`). Bulletproof equivalent if a ref is ambiguous:
+`diffx -- "$(git merge-base origin/main HEAD)..HEAD"`.
+
+If the user names a different base ("vs staging", "since the v2 tag"), swap it in —
+but keep it three-dot against a fresh ref.
 
 Run with `run_in_background: true` so the server stays alive while the user reviews. diffx writes a state file at `$CLAUDE_TMPDIR/diffx-state.json` so the other subcommands auto-discover it.
 
