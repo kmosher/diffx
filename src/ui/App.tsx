@@ -16,7 +16,7 @@ import { FileEditorModal } from './components/FileEditorModal'
 
 export function App() {
   const { settings, loaded, updateSettings } = useSettings()
-  const { patch, repoName, branch, customMode, binaryFiles, fileContents, untrackedFiles, loading, error } = useDiff({
+  const { patch, repoName, branch, customMode, binaryFiles, fileContents, untrackedFiles, initialLoading, error } = useDiff({
     staged: settings.staged,
     untracked: settings.untracked,
   })
@@ -204,7 +204,7 @@ export function App() {
     setViewed(filePath, viewed)
   }, [setViewed])
 
-  if (!loaded || loading) {
+  if (!loaded || initialLoading) {
     return (
       <div className="loading">
         <p>Loading diff...</p>

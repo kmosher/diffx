@@ -78,6 +78,12 @@ export function useDiff(options: DiffOptions) {
     untrackedFiles: data?.untrackedFiles ?? [],
     fileContents: data?.fileContents ?? {},
     loading,
+    // True only before the first successful load. A background refetch
+    // (SSE file-written, `diffx refresh`) still flips `loading`, but the
+    // caller already has `data` to render from — distinguishing the two
+    // lets the UI keep the diff mounted (and its scroll position intact)
+    // instead of unmounting to a full-page spinner on every refresh.
+    initialLoading: loading && data === null,
     error,
     reload: load,
   }
