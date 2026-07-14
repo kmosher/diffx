@@ -51,3 +51,16 @@ export function removeState(path: string = defaultStatePath()): void {
     // already gone, or never written
   }
 }
+
+/**
+ * Remove the state file only if it still advertises this process. A newer
+ * server may have overwritten the file (same session, e.g. one diffx killed
+ * and another started) before this one's shutdown handler runs; blindly
+ * unlinking would delete the newer server's state and break CLI discovery
+ * for a server that's still alive.
+ */
+export function removeStateIfOwned(pid: number, path: string = defaultStatePath()): void {
+  const current = readState(path)
+  if (current !== null && current.pid !== pid) return
+  removeState(path)
+}

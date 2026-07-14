@@ -7,7 +7,7 @@ import getPort from 'get-port'
 import { isGitRepo, getRepoName, getBranchName } from './git.js'
 import { startServer } from './server.js'
 import { loadSettings, type Settings } from './settings.js'
-import { defaultStatePath, writeState, removeState } from './state.js'
+import { defaultStatePath, writeState, removeStateIfOwned } from './state.js'
 import { SUBCOMMANDS, cmdState, cmdComments, cmdReply, cmdResolve, cmdReopen, cmdWaitForSubmit, cmdWatch, cmdRefresh } from './subcommands.js'
 
 // Subcommand dispatch happens BEFORE parseArgs so that flags like --staged
@@ -160,7 +160,7 @@ writeState({
 }, statePath)
 console.log(`state file: ${statePath}`)
 
-const cleanup = () => removeState(statePath)
+const cleanup = () => removeStateIfOwned(process.pid, statePath)
 process.on('SIGINT', () => {
   console.log('\nShutting down...')
   cleanup()
