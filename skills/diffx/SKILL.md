@@ -17,31 +17,47 @@ diffx [-- <git-diff-args>]
 No args reviews the working tree (staged + unstaged + untracked). Common variants:
 
 ```bash
-diffx -- --staged                 # only staged
-diffx -- HEAD~3                    # last 3 commits
-diffx -- origin/main...HEAD        # this branch's own changes vs main (see below)
+diffx -- --staged                              # only staged
+diffx -- HEAD~3                                 # last 3 commits
+diffx -- "$(git merge-base origin/main HEAD)"   # this branch's changes vs main, incl. uncommitted (see below)
 ```
 
 ### Picking the diff range for "review this branch"
 
-To review a branch's *own* changes, use **three-dot** `origin/main...HEAD`, not
-two-dot `main..HEAD`. The difference bites:
+To review a branch's *own* changes, the default should be **working tree vs
+merge-base**:
 
-- **Two-dot `A..B`** diffs the two *tip commits*. If the base ref has moved on
-  since the branch was cut (it usually has), every commit that landed on the base
-  meanwhile shows up — typically as a wall of phantom *deletions* in unrelated
-  files. This is the #1 way the diff comes out wrong.
-- **Three-dot `A...B`** diffs from the **merge-base**, so you get exactly what the
-  branch added, regardless of how far the base advanced. This is what you want.
+```bash
+diffx -- "$(git merge-base origin/main HEAD)"
+```
+
+A single commit argument makes git diff the **working tree** against that
+commit. This matters because of Step 4's edit loop: when you apply a change the
+user requested and run `diffx refresh`, an uncommitted edit is only visible if
+the diff range includes the working tree. A commits-only range (`A...HEAD`)
+silently shows stale code after refresh — the user sees their comment
+"resolved" against a diff that never changed. (Committing after every applied
+comment also works, but don't rely on remembering to.)
+
+Ranges to avoid, and why:
+
+- **Two-dot `main..HEAD`** diffs the two *tip commits*. If the base ref has
+  moved on since the branch was cut (it usually has), every commit that landed
+  on the base meanwhile shows up — typically as a wall of phantom *deletions*
+  in unrelated files. This is the #1 way the diff comes out wrong.
+- **Three-dot `origin/main...HEAD`** fixes the phantom-deletion problem (it
+  diffs from the merge-base) but is commits-only — uncommitted edits never
+  appear, so `diffx refresh` looks broken mid-review. Use it only when you
+  specifically want to exclude working-tree noise *and* you commit each
+  applied change before refreshing.
 
 Also pick a **fresh** base ref: prefer `origin/main` (or `origin/master`) over
 local `main`/`master`, which is often tens of commits stale. When unsure which is
 the default branch, resolve it once: `git rev-parse --abbrev-ref origin/HEAD`
-(e.g. `origin/main`). Bulletproof equivalent if a ref is ambiguous:
-`diffx -- "$(git merge-base origin/main HEAD)..HEAD"`.
+(e.g. `origin/main`).
 
-If the user names a different base ("vs staging", "since the v2 tag"), swap it in —
-but keep it three-dot against a fresh ref.
+If the user names a different base ("vs staging", "since the v2 tag"), swap it
+into the `merge-base` call — the working-tree-vs-merge-base shape stays the same.
 
 Run with `run_in_background: true` so the server stays alive while the user reviews. diffx writes a state file at `$CLAUDE_TMPDIR/diffx-state.json` so the other subcommands auto-discover it.
 
