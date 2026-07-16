@@ -127,7 +127,17 @@ async function streamEvents(label: string, onEvent: (ev: SseEvent) => void): Pro
   const decoder = new TextDecoder()
   let buf = ''
   while (true) {
-    const { value, done } = await reader.read()
+    let value: Uint8Array | undefined
+    let done: boolean
+    try {
+      ;({ value, done } = await reader.read())
+    } catch {
+      // The server going away mid-stream (killed, crashed, Ctrl+C) surfaces
+      // as a socket error here rather than a clean `done: true` read. Treat
+      // it the same as a graceful close — the caller decides what an
+      // unexpected disconnect means (e.g. exit code).
+      return
+    }
     if (done) return
     buf += decoder.decode(value, { stream: true })
     // SSE events are separated by a blank line.
@@ -177,27 +187,36 @@ export async function cmdWaitForSubmit(): Promise<void> {
  * Stream comment events from the diffx UI, one JSON line per event.
  *
  * Designed to run as a long-lived Monitor task: each printed line is a
- * wake-up notification for the orchestrating Claude session. Exits 0
- * when the user clicks "Done reviewing", 2 if the server drops, 130 on
+ * wake-up notification for the orchestrating Claude session. "Done
+ * reviewing" is NOT terminal — comments/replies can keep arriving after it,
+ * so watch stays connected and keeps streaming them. It only exits once the
+ * diffx server itself shuts down (which happens once every subscriber,
+ * browser tab and this watcher included, has disconnected). Exits 0 if
+ * `submitted` was ever seen, 2 if the server drops before that, 130 on
  * Ctrl+C.
  *
  * Emitted line shapes (one per line, newline-terminated):
  *   {"type":"comment-added","comment":{...}}
  *   {"type":"reply-added","commentId":"...","reply":{...}}
- *   {"type":"submitted","timestamp":...}     // final line before exit 0
+ *   {"type":"submitted","timestamp":...}     // not final — watch keeps streaming after this
  */
 export async function cmdWatch(): Promise<void> {
-  console.error('watch: connected — streaming comment events. Click Done reviewing to stop.')
+  console.error('watch: connected — streaming comment events.')
+  let submitted = false
   await streamEvents('watch', (ev) => {
     if (ev.type === 'comment-added' || ev.type === 'reply-added') {
       process.stdout.write(JSON.stringify(ev) + '\n')
     } else if (ev.type === 'submitted') {
+      submitted = true
       process.stdout.write(JSON.stringify(ev) + '\n')
-      process.exit(0)
     }
     // state events and pings are intentionally swallowed.
   })
-  console.error('watch: server closed the connection.')
+  if (submitted) {
+    console.error('watch: server shut down after Done reviewing.')
+    process.exit(0)
+  }
+  console.error('watch: server closed the connection before Done reviewing.')
   process.exit(2)
 }
 

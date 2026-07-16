@@ -96,7 +96,8 @@ Subcommands (talk to the running diffx server for the current session):
   wait-for-submit             Block until the user clicks Done reviewing in the browser UI
                               (exit 0 on submit, 2 on disconnect, 130 on Ctrl+C)
   watch                       Stream comment events as JSON lines on stdout
-                              (one line per new comment / reply; exits 0 on Done reviewing)
+                              (one line per new comment / reply / submit; stays connected
+                              after Done reviewing, exits when the diffx server shuts down)
   refresh                     Tell the browser tab to refetch the diff (after edits
                               made outside the in-browser editor)
 

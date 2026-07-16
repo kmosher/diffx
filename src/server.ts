@@ -86,7 +86,12 @@ interface Subscriber {
   stream: SSEStreamingApi
 }
 
-export function createApp(clientDir: string, customDiffArgs?: string[], commentStore?: CommentStore) {
+export function createApp(
+  clientDir: string,
+  customDiffArgs?: string[],
+  commentStore?: CommentStore,
+  onSubscriberCountChange?: (count: number) => void,
+) {
   const app = new Hono()
   const isCustomMode = !!customDiffArgs
   const store = commentStore ?? new InMemoryCommentStore()
@@ -101,7 +106,7 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     try {
       await sub.stream.writeSSE({ data: JSON.stringify(payload) })
     } catch {
-      subscribers.delete(sub)
+      if (subscribers.delete(sub)) onSubscriberCountChange?.(subscribers.size)
     }
   }
   const broadcast = async (payload: unknown) => {
@@ -353,12 +358,16 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     return streamSSE(c, async (stream) => {
       const sub: Subscriber = { id: crypto.randomUUID(), role, stream }
       subscribers.add(sub)
+      onSubscriberCountChange?.(subscribers.size)
       await broadcastState()
       // Initial snapshot to the new subscriber.
       await sendTo(sub, { type: 'state', ...snapshotState() })
 
       const cleanup = () => {
-        if (subscribers.delete(sub)) void broadcastState()
+        if (subscribers.delete(sub)) {
+          onSubscriberCountChange?.(subscribers.size)
+          void broadcastState()
+        }
       }
       c.req.raw.signal.addEventListener('abort', cleanup)
 
@@ -377,9 +386,12 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
     })
   })
 
-  // Submit pulse: tells any waiting CLI watchers that the human is done.
-  // Submit is idempotent on the wire; the UI is responsible for greying
-  // out the button once the user has clicked it.
+  // Submit pulse: tells any waiting CLI watchers the human clicked Done
+  // reviewing. This is NOT a session end — comments/replies keep flowing
+  // over the same connection afterward. The server only shuts itself down
+  // once every subscriber has actually disconnected (see IDLE_SHUTDOWN_MS
+  // in startServer). Submit is idempotent on the wire; the UI is
+  // responsible for greying out the button once the user has clicked it.
   app.post('/api/submit', async (c) => {
     const ts = Date.now()
     await broadcast({ type: 'submitted', timestamp: ts })
@@ -415,16 +427,43 @@ export function createApp(clientDir: string, customDiffArgs?: string[], commentS
   return app
 }
 
+// Grace period after the last subscriber (browser tab or `diffx watch`)
+// disconnects before the server shuts itself down. Long enough to survive a
+// page refresh or a brief network blip without killing an in-progress review.
+const IDLE_SHUTDOWN_MS = 60_000
+
 export function startServer(options: {
   port: number
   host: string
   clientDir: string
   customDiffArgs?: string[]
 }): Promise<{ port: number }> {
-  const app = createApp(options.clientDir, options.customDiffArgs)
+  let server: ReturnType<typeof serve>
+  let idleTimer: NodeJS.Timeout | undefined
+  // Don't arm the idle timer before anyone has ever connected — the window
+  // between server start and the browser tab opening looks identical to
+  // "everyone left" if we don't gate on this.
+  let everHadSubscriber = false
+
+  const onSubscriberCountChange = (count: number) => {
+    if (count > 0) {
+      everHadSubscriber = true
+      if (idleTimer) {
+        clearTimeout(idleTimer)
+        idleTimer = undefined
+      }
+      return
+    }
+    if (!everHadSubscriber || idleTimer) return
+    idleTimer = setTimeout(() => {
+      server.close(() => process.exit(0))
+    }, IDLE_SHUTDOWN_MS)
+  }
+
+  const app = createApp(options.clientDir, options.customDiffArgs, undefined, onSubscriberCountChange)
 
   return new Promise((resolve) => {
-    const server = serve({
+    server = serve({
       fetch: app.fetch,
       port: options.port,
       hostname: options.host,

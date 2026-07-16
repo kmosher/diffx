@@ -120,19 +120,21 @@ Read the new line(s) from the Monitor. For each:
 
 - **`reply-added`** — the user replied to one of your earlier replies (probably pushback or follow-up). Read the reply, treat it like a new request scoped to that comment, and respond the same way.
 
-- **`submitted`** — the user clicked Done reviewing. Move to Step 5.
+- **`submitted`** — the user clicked Done reviewing. This is **not** the end of the session — they can still leave more comments or reply to yours, and you'll keep waking up for them. Acknowledge briefly (e.g. "Got it — I'll keep watching in case you have more comments") and end the turn as usual. Do not summarize or wrap up yet; that happens in Step 5, when the Monitor itself exits.
 
 End the turn after handling the event(s). The Monitor will wake you again on the next one.
 
 **Self-echo guard:** your own `diffx reply` calls don't produce `reply-added` events (the server suppresses them via `?source=cli`). You only wake on human input.
 
-## Step 5: Wrap up (on `submitted`)
+## Step 5: Wrap up (when the Monitor exits)
 
-Once you see the `submitted` line, the Monitor will exit on its own. Summarize briefly: N applied, M answered, K left open (and why).
+The diffx server shuts itself down once every subscriber — browser tab and this Monitor included — has disconnected (with a short grace period for refreshes). That's what ends the session, not the `submitted` event. When the Monitor process exits:
+
+- **Exit 0** — the user clicked Done reviewing at some point before closing the tab. Summarize briefly: N applied, M answered, K left open (and why).
+- **Exit 2** — the connection dropped before `submitted` was ever seen (tab closed without clicking Done, crash, killed, port conflict). Tell the user and stop; don't silently re-launch.
 
 ## Failure modes
 
-- **Monitor exits non-zero before submit** → diffx server is gone (crash, killed, port conflict). Tell the user and stop. Don't silently re-launch.
 - **No watcher attached when user tries to click Done** → they'll see "No watcher" in the UI. They can either start the watch from Claude or fall back to Copy.
 
 ## Manual fallback
