@@ -557,9 +557,12 @@ export const CodeViewWrapper = memo(
     // Comment/Delete pill (Stage 6). Listens on scrollRef (the same element
     // handed to CodeView as containerRef) rather than document, since
     // mouseup is a composed event and bubbles out through an open shadow
-    // root to any light-DOM ancestor listener -- we don't need
-    // composedPath() gymnastics for *this* listener, only for reading the
-    // selection itself (see selectionMapping.ts).
+    // root to any light-DOM ancestor listener. But at a light-DOM listener
+    // `e.target` is retargeted to the shadow *host*, whose root node is the
+    // document — seeding the selection lookup with it makes
+    // getActiveSelectionRange fall back to document.getSelection(), which
+    // Chrome blinds for shadow-internal selections. composedPath()[0] is
+    // the untargeted deep node and identifies the right shadow root.
     useEffect(() => {
       const container = scrollRef.current
       if (!container) return
@@ -569,7 +572,7 @@ export const CodeViewWrapper = memo(
         // Chrome on a fast double-click-drag); reading it a tick later is
         // more reliable than reading synchronously in the handler.
         requestAnimationFrame(() => {
-          const range = getActiveSelectionRange(e.target)
+          const range = getActiveSelectionRange(e.composedPath()[0] ?? e.target)
           if (!range) return
           const anchor = mapRangeToAnchor(range)
           if (!anchor) return
