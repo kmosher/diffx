@@ -567,12 +567,15 @@ export const CodeViewWrapper = memo(
       const container = scrollRef.current
       if (!container) return
       const handleMouseUp = (e: MouseEvent) => {
+        // composedPath() must be read synchronously — after dispatch
+        // completes it returns [], per spec.
+        const deepTarget = e.composedPath()[0] ?? e.target
         // requestAnimationFrame: on mouseup the browser hasn't always
         // finished finalizing the Selection object yet (most visible in
         // Chrome on a fast double-click-drag); reading it a tick later is
         // more reliable than reading synchronously in the handler.
         requestAnimationFrame(() => {
-          const range = getActiveSelectionRange(e.composedPath()[0] ?? e.target)
+          const range = getActiveSelectionRange(deepTarget)
           if (!range) return
           const anchor = mapRangeToAnchor(range)
           if (!anchor) return
