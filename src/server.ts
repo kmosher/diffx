@@ -113,11 +113,26 @@ interface Subscriber {
   stream: SSEStreamingApi
 }
 
+// Grace period after the last browser tab disconnects before the server
+// shuts itself down. Long enough to survive a page refresh or a brief
+// network blip without killing an in-progress review. Keyed on browser
+// (role:'ui') presence specifically, not total subscriber count — a `diffx
+// watch` or agent ws subscriber must never hold the server alive on its own,
+// otherwise a long-lived watcher with no browser ever attached keeps the
+// process running forever.
+const IDLE_SHUTDOWN_MS = 60_000
+
+// If no browser ever connects at all within this window of server start,
+// nobody's reviewing — shut down instead of running forever. Distinct from
+// IDLE_SHUTDOWN_MS, which only starts counting after a browser has been seen
+// and then left.
+const NO_BROWSER_TIMEOUT_MS = 3 * 60_000
+
 export function createApp(
   clientDir: string,
   customDiffArgs?: string[],
   commentStore?: CommentStore,
-  onSubscriberCountChange?: (count: number) => void,
+  onShutdown?: () => void,
 ) {
   const app = new Hono()
   const isCustomMode = !!customDiffArgs
@@ -133,13 +148,42 @@ export function createApp(
     try {
       await sub.stream.writeSSE({ data: JSON.stringify(payload) })
     } catch {
-      if (subscribers.delete(sub)) onSubscriberCountChange?.(subscribers.size)
+      if (subscribers.delete(sub)) checkIdle()
     }
   }
   const broadcast = async (payload: unknown) => {
     await Promise.all([...subscribers].map((s) => sendTo(s, payload)))
   }
   const broadcastState = () => broadcast({ type: 'state', ...snapshotState() })
+
+  // Principal-based idle shutdown (see IDLE_SHUTDOWN_MS/NO_BROWSER_TIMEOUT_MS
+  // above). `review-ended` is a terminal broadcast — `diffx watch` treats it
+  // as "the reviewer left without submitting" (exit code 3) — sent before we
+  // tear the process down so any connected watcher gets to see it land.
+  let everHadBrowser = false
+  let idleTimer: NodeJS.Timeout | undefined
+  let noBrowserTimer: NodeJS.Timeout | undefined = setTimeout(() => {
+    void broadcast({ type: 'review-ended', reason: 'no-browser' }).then(() => onShutdown?.())
+  }, NO_BROWSER_TIMEOUT_MS)
+  const checkIdle = () => {
+    const { uiCount } = snapshotState()
+    if (uiCount > 0) {
+      everHadBrowser = true
+      if (noBrowserTimer) {
+        clearTimeout(noBrowserTimer)
+        noBrowserTimer = undefined
+      }
+      if (idleTimer) {
+        clearTimeout(idleTimer)
+        idleTimer = undefined
+      }
+      return
+    }
+    if (!everHadBrowser || idleTimer) return
+    idleTimer = setTimeout(() => {
+      void broadcast({ type: 'review-ended', reason: 'idle' }).then(() => onShutdown?.())
+    }, IDLE_SHUTDOWN_MS)
+  }
 
   const repoRoot = getRepoRoot()
 
@@ -435,14 +479,14 @@ export function createApp(
     return streamSSE(c, async (stream) => {
       const sub: Subscriber = { id: crypto.randomUUID(), role, stream }
       subscribers.add(sub)
-      onSubscriberCountChange?.(subscribers.size)
+      checkIdle()
       await broadcastState()
       // Initial snapshot to the new subscriber.
       await sendTo(sub, { type: 'state', ...snapshotState() })
 
       const cleanup = () => {
         if (subscribers.delete(sub)) {
-          onSubscriberCountChange?.(subscribers.size)
+          checkIdle()
           void broadcastState()
         }
       }
@@ -466,9 +510,9 @@ export function createApp(
   // Submit pulse: tells any waiting CLI watchers the human clicked Done
   // reviewing. This is NOT a session end — comments/replies keep flowing
   // over the same connection afterward. The server only shuts itself down
-  // once every subscriber has actually disconnected (see IDLE_SHUTDOWN_MS
-  // in startServer). Submit is idempotent on the wire; the UI is
-  // responsible for greying out the button once the user has clicked it.
+  // once every browser tab has actually disconnected (see IDLE_SHUTDOWN_MS
+  // above). Submit is idempotent on the wire; the UI is responsible for
+  // greying out the button once the user has clicked it.
   app.post('/api/submit', async (c) => {
     const ts = Date.now()
     await broadcast({ type: 'submitted', timestamp: ts })
@@ -504,11 +548,6 @@ export function createApp(
   return { app, closeWatcher: () => repoWatcher.close() }
 }
 
-// Grace period after the last subscriber (browser tab or `diffx watch`)
-// disconnects before the server shuts itself down. Long enough to survive a
-// page refresh or a brief network blip without killing an in-progress review.
-const IDLE_SHUTDOWN_MS = 60_000
-
 export function startServer(options: {
   port: number
   host: string
@@ -516,29 +555,16 @@ export function startServer(options: {
   customDiffArgs?: string[]
 }): Promise<{ port: number }> {
   let server: ReturnType<typeof serve>
-  let idleTimer: NodeJS.Timeout | undefined
-  // Don't arm the idle timer before anyone has ever connected — the window
-  // between server start and the browser tab opening looks identical to
-  // "everyone left" if we don't gate on this.
-  let everHadSubscriber = false
 
-  const onSubscriberCountChange = (count: number) => {
-    if (count > 0) {
-      everHadSubscriber = true
-      if (idleTimer) {
-        clearTimeout(idleTimer)
-        idleTimer = undefined
-      }
-      return
-    }
-    if (!everHadSubscriber || idleTimer) return
-    idleTimer = setTimeout(() => {
-      void closeWatcher()
-      server.close(() => process.exit(0))
-    }, IDLE_SHUTDOWN_MS)
+  // createApp owns the idle-shutdown decision (it needs uiCount, which only
+  // it tracks); this is just the mechanics of actually tearing the process
+  // down once createApp decides it's time.
+  const onShutdown = () => {
+    void closeWatcher()
+    server.close(() => process.exit(0))
   }
 
-  const { app, closeWatcher } = createApp(options.clientDir, options.customDiffArgs, undefined, onSubscriberCountChange)
+  const { app, closeWatcher } = createApp(options.clientDir, options.customDiffArgs, undefined, onShutdown)
 
   return new Promise((resolve) => {
     server = serve({
