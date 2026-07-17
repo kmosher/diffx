@@ -5,7 +5,7 @@ import { serve } from '@hono/node-server'
 import { streamSSE, type SSEStreamingApi } from 'hono/streaming'
 import { getGitDiff, getCustomGitDiff, getRepoName, getBranchName, getFileContent, getFileContentAtRef, getRepoRoot, resolveDiffRefs, WORKING_TREE_REF, getUntrackedFilePaths, writeWorkingTreeFile } from './git.js'
 import { loadSettings, saveSettings } from './settings.js'
-import { InMemoryCommentStore } from './comments.js'
+import { InMemoryCommentStore, FileBackedCommentStore } from './comments.js'
 import type { CommentStore } from './comments.js'
 import { isSafePath } from './path.js'
 import { watchRepo, type RepoWatcher } from './watcher.js'
@@ -602,6 +602,10 @@ export function startServer(options: {
   host: string
   clientDir: string
   customDiffArgs?: string[]
+  // Comments (and drafts) persist here, next to the session state file, and
+  // reload on start. Omitted -> in-memory only (matches prior behavior; also
+  // what the test suite wants, since it doesn't want temp files on disk).
+  commentsFilePath?: string
 }): Promise<{ port: number }> {
   let server: ReturnType<typeof serve>
 
@@ -613,7 +617,8 @@ export function startServer(options: {
     server.close(() => process.exit(0))
   }
 
-  const { app, closeWatcher } = createApp(options.clientDir, options.customDiffArgs, undefined, onShutdown)
+  const commentStore = options.commentsFilePath ? new FileBackedCommentStore(options.commentsFilePath) : undefined
+  const { app, closeWatcher } = createApp(options.clientDir, options.customDiffArgs, commentStore, onShutdown)
 
   return new Promise((resolve) => {
     server = serve({

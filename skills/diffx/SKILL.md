@@ -77,13 +77,20 @@ Line shapes:
 
 ```json
 {"type":"comment-added","comment":{"id":"...","filePath":"...","lineNumber":42,"endLine":42,"body":"...", ...}}
+{"type":"comment-updated","comment":{"id":"...","lineNumber":45,"outdated":false, ...}}
 {"type":"reply-added","commentId":"...","reply":{"id":"...","body":"...","author":"user","createdAt":...},"commentStatus":"open"}
+{"type":"clients","browsers":1}
 {"type":"submitted","timestamp":...}
+{"type":"review-ended","reason":"idle"|"no-browser"}
 ```
 
 Comments carry both `lineNumber` (start) and `endLine` (inclusive end). For a single-line comment they're equal; when the user drag-selected a range in the gutter, `endLine > lineNumber` and `lineContent` contains the selected lines joined with `\n`. Treat the range as the scope of the comment when applying changes.
 
 Replies carry `author: 'user' | 'agent'`. You only see `reply-added` events for `author: 'user'` (the server suppresses your own CLI replies). The `commentStatus` field on the event is the post-event status of the parent comment — if the user replied to a comment you'd already resolved, the server auto-reopens it and `commentStatus` will be `"open"` so you can react without re-fetching.
+
+**`comment-updated`** fires when a live file edit shifted a comment's anchor (or restored/broke the match): `lineNumber`/`endLine` reflect the new position, `outdated: true` means the server couldn't confidently re-match it and the position may be stale. Update your working copy of that comment's location rather than treating it as a new comment.
+
+**Draft comments never reach you.** The user can save a comment as a draft instead of posting it — drafts are invisible to `diffx watch`/`diffx comments` until the user posts them (or clicks Done reviewing, which posts any stragglers). You will never see a draft comment's `comment-added` until that happens; there's nothing to do differently, just don't assume every comment the user has typed is one you've seen.
 
 The clipboard "Copy comments" payload carries a `<code-review-comments version="2">` root. Future shape changes will bump that version; if you see a higher version than you understand, fall back to `diffx watch` / `diffx comments` (always the wire-current shape) rather than parsing the payload.
 
@@ -107,11 +114,15 @@ Read the new line(s) from the Monitor. For each:
 - **`comment-added`** — read `comment.filePath`/`lineNumber`/`body`. Decide what it is:
   - **Change request** ("rename x", "extract helper", "use Map here") → Read the file, apply the change via Edit, then:
     ```bash
-    diffx refresh
     diffx reply <id> "Done. <one-line summary of what changed>"
     diffx resolve <id>
     ```
-    `diffx refresh` tells the open browser tab to refetch the diff so the edit shows up immediately — your Edit-tool writes don't go through diffx's own file-write path, so nothing else triggers that refresh.
+    Don't call `diffx refresh` for this — diffx runs an always-on fs-watcher
+    that picks up your Edit-tool writes on its own (content-hashed, ~200ms
+    debounce) and refreshes the open browser tab automatically. `diffx
+    refresh` is a manual escape hatch for the rare case the watcher missed
+    something (e.g. a change made before diffx started watching); reach for
+    it only if the user says the diff looks stale.
   - **Question** ("why not X?", "is this thread-safe?") → answer in reply. If you're confident the answer fully addresses it, also `diffx resolve <id>`. If it might prompt follow-up, leave it open.
     ```bash
     diffx reply <id> "<your answer>"
@@ -128,10 +139,11 @@ End the turn after handling the event(s). The Monitor will wake you again on the
 
 ## Step 5: Wrap up (when the Monitor exits)
 
-The diffx server shuts itself down once every subscriber — browser tab and this Monitor included — has disconnected (with a short grace period for refreshes). That's what ends the session, not the `submitted` event. When the Monitor process exits:
+The diffx server shuts itself down once every browser tab has disconnected (with a short grace period for refreshes) — this Monitor's own connection doesn't keep it alive on its own. That's what ends the session, not the `submitted` event. When the Monitor process exits:
 
 - **Exit 0** — the user clicked Done reviewing at some point before closing the tab. Summarize briefly: N applied, M answered, K left open (and why).
-- **Exit 2** — the connection dropped before `submitted` was ever seen (tab closed without clicking Done, crash, killed, port conflict). Tell the user and stop; don't silently re-launch.
+- **Exit 3** — the server broadcast `review-ended` (the last browser tab left, or none ever connected) before `submitted` was ever seen. The reviewer walked away without clicking Done reviewing. Tell the user what you got through (if anything) and that the review session ended without an explicit sign-off; don't silently re-launch.
+- **Exit 2** — the connection dropped some other way (crash, killed, port conflict) with neither `submitted` nor `review-ended` seen. Tell the user and stop; don't silently re-launch.
 
 ## Failure modes
 

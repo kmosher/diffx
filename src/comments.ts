@@ -1,4 +1,5 @@
 import type { ReviewComment, CommentReply } from './types.js'
+import { loadPersistedComments, savePersistedComments } from './persistence.js'
 
 // Fields callers may patch via update(). Broader than "user edits" (body,
 // status) to also cover the re-anchoring fields reanchor.ts writes after a
@@ -16,7 +17,12 @@ export interface CommentStore {
 }
 
 export class InMemoryCommentStore implements CommentStore {
-  private comments: ReviewComment[] = []
+  protected comments: ReviewComment[] = []
+
+  // No-op hook, overridden by FileBackedCommentStore. Called after every
+  // mutating operation so a subclass can persist without duplicating the
+  // mutation logic above.
+  protected persist(): void {}
 
   async getAll(): Promise<ReviewComment[]> {
     return this.comments
@@ -24,6 +30,7 @@ export class InMemoryCommentStore implements CommentStore {
 
   async add(comment: ReviewComment): Promise<ReviewComment> {
     this.comments.push(comment)
+    this.persist()
     return comment
   }
 
@@ -36,6 +43,7 @@ export class InMemoryCommentStore implements CommentStore {
     if (fields.endLine !== undefined) comment.endLine = fields.endLine
     if (fields.lineContent !== undefined) comment.lineContent = fields.lineContent
     if (fields.outdated !== undefined) comment.outdated = fields.outdated
+    this.persist()
     return comment
   }
 
@@ -43,6 +51,7 @@ export class InMemoryCommentStore implements CommentStore {
     const index = this.comments.findIndex((c) => c.id === id)
     if (index === -1) return false
     this.comments.splice(index, 1)
+    this.persist()
     return true
   }
 
@@ -50,6 +59,26 @@ export class InMemoryCommentStore implements CommentStore {
     const comment = this.comments.find((c) => c.id === commentId)
     if (!comment) return null
     comment.replies.push(reply)
+    this.persist()
     return comment
+  }
+}
+
+// Same behavior as InMemoryCommentStore, plus: loads from `filePath` at
+// construction and writes the full comment list back after every mutation.
+// Comments (including drafts — see reanchor.ts/server.ts's draft-suppression
+// logic, which is orthogonal to persistence) survive a server restart or
+// `diffx` version upgrade instead of the review silently starting over.
+export class FileBackedCommentStore extends InMemoryCommentStore {
+  private readonly filePath: string
+
+  constructor(filePath: string) {
+    super()
+    this.filePath = filePath
+    this.comments = loadPersistedComments(filePath)
+  }
+
+  protected persist(): void {
+    savePersistedComments(this.filePath, this.comments)
   }
 }

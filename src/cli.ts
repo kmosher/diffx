@@ -8,6 +8,7 @@ import { isGitRepo, getRepoName, getBranchName } from './git.js'
 import { startServer } from './server.js'
 import { loadSettings, type Settings } from './settings.js'
 import { defaultStatePath, writeState, removeStateIfOwned } from './state.js'
+import { commentsFilePathFor } from './persistence.js'
 import { SUBCOMMANDS, cmdState, cmdComments, cmdReply, cmdResolve, cmdReopen, cmdWaitForSubmit, cmdWatch, cmdRefresh } from './subcommands.js'
 
 // Subcommand dispatch happens BEFORE parseArgs so that flags like --staged
@@ -144,13 +145,19 @@ const resolvedClientDir = existsSync(clientDir)
   ? clientDir
   : resolve(process.cwd(), 'dist/client')
 
-const { port: actualPort } = await startServer({ port, host, clientDir: resolvedClientDir, customDiffArgs })
+// Computed before startServer (rather than after, as previously) so the
+// comments-persistence file can be derived from it and handed in — comments
+// need to be loaded before the server starts serving requests, not bolted
+// on afterward.
+const statePath = defaultStatePath()
+const commentsFilePath = commentsFilePathFor(statePath)
+
+const { port: actualPort } = await startServer({ port, host, clientDir: resolvedClientDir, customDiffArgs, commentsFilePath })
 
 const localUrl = `http://${host}:${actualPort}`
 
 console.log(`diffx server running at ${localUrl}`)
 
-const statePath = defaultStatePath()
 writeState({
   port: actualPort,
   pid: process.pid,
