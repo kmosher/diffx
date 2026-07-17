@@ -300,6 +300,16 @@ body {
     background: color-mix(in srgb, var(--warning, #d97706) 12%, transparent);
 }
 
+/* "Post drafts" button — shown only while draftCount > 0 */
+.btn-draft-post {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-draft-post:hover {
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
 /* Layout */
 .app-body {
     display: flex;
@@ -922,6 +932,20 @@ body {
     font-weight: 500;
 }
 
+/* Draft comments — saved but not yet posted (invisible to any watcher) */
+.comment-draft {
+    border-left: 2px solid var(--primary);
+}
+
+.comment-bubble-draft {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: var(--primary);
+    font-weight: 500;
+}
+
 .comment-suggestion {
     margin-top: 8px;
     border: 1px solid var(--border);
@@ -1401,6 +1425,11 @@ body {
     white-space: nowrap;
 }
 
+.ct-count-draft {
+    color: var(--primary);
+    font-style: italic;
+}
+
 .ct-count-open {
     color: #bf8700;
 }
@@ -1460,6 +1489,10 @@ body {
     display: flex;
     align-items: center;
     flex-shrink: 0;
+}
+
+.ct-status-draft {
+    color: var(--primary);
 }
 
 .ct-status-open {

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DiffLineAnnotation } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
@@ -31,7 +31,10 @@ const renderCodeBlock = (c: ReviewComment): string[] => {
 }
 
 async function fetchComments(): Promise<ReviewComment[]> {
-  const res = await fetch('/api/comments')
+  // includeDrafts=true: the browser is the only caller allowed to see
+  // draft comments (rendered with a Draft badge). Every other caller of
+  // this endpoint — notably `diffx comments` — gets the agent-visible view.
+  const res = await fetch('/api/comments?includeDrafts=true')
   return res.json()
 }
 
@@ -40,7 +43,7 @@ export function useComments() {
   const { data: comments = [] } = useQuery({ queryKey: COMMENTS_KEY, queryFn: fetchComments, refetchInterval: 3000 })
 
   const addMutation = useMutation({
-    mutationFn: async (params: { filePath: string; side: 'deletions' | 'additions'; lineNumber: number; endLine: number; lineContent: string; body: string; suggestion?: { newLines: string[] } }) => {
+    mutationFn: async (params: { filePath: string; side: 'deletions' | 'additions'; lineNumber: number; endLine: number; lineContent: string; body: string; suggestion?: { newLines: string[] }; status?: 'draft' }) => {
       const res = await fetch('/api/comments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -50,6 +53,21 @@ export function useComments() {
     },
     onSuccess: (comment) => {
       queryClient.setQueryData<ReviewComment[]>(COMMENTS_KEY, (prev = []) => [...prev, comment])
+    },
+  })
+
+  // Flips every draft to 'open' server-side in one batch (see
+  // postDraftsAndBroadcast in server.ts) — used by the toolbar's "Post
+  // drafts" button and implicitly by Submit ("Done reviewing").
+  const postDraftsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/drafts/post', { method: 'POST' })
+      return res.json() as Promise<{ ok: true; posted: number }>
+    },
+    onSuccess: () => {
+      // Server-side status flip isn't reflected in our optimistic cache —
+      // let the next 3s poll (or an immediate refetch) pick up the change.
+      void queryClient.invalidateQueries({ queryKey: COMMENTS_KEY })
     },
   })
 
@@ -106,11 +124,16 @@ export function useComments() {
       lineContent: string,
       body: string,
       suggestion?: { newLines: string[] },
+      asDraft?: boolean,
     ) => {
-      addMutation.mutate({ filePath, side, lineNumber, endLine, lineContent, body, suggestion })
+      addMutation.mutate({ filePath, side, lineNumber, endLine, lineContent, body, suggestion, ...(asDraft ? { status: 'draft' } : {}) })
     },
     [addMutation],
   )
+
+  const postDrafts = useCallback(() => {
+    postDraftsMutation.mutate()
+  }, [postDraftsMutation])
 
   const removeComment = useCallback(
     (id: string) => {
@@ -141,10 +164,14 @@ export function useComments() {
   )
 
   const formatAllComments = useCallback((): string => {
-    if (comments.length === 0) return ''
+    // Drafts are "not yet visible to the agent" everywhere, including this
+    // explicit copy action — matches the watcher/ws suppression, so a
+    // reviewer can't accidentally leak an in-progress draft.
+    const postable = comments.filter((c) => c.status !== 'draft')
+    if (postable.length === 0) return ''
 
     const grouped = new Map<string, ReviewComment[]>()
-    for (const comment of comments) {
+    for (const comment of postable) {
       const list = grouped.get(comment.filePath) ?? []
       list.push(comment)
       grouped.set(comment.filePath, list)
@@ -196,6 +223,8 @@ export function useComments() {
     await navigator.clipboard.writeText(text)
   }, [formatAllComments])
 
+  const draftCount = useMemo(() => comments.filter((c) => c.status === 'draft').length, [comments])
+
   return {
     comments,
     addComment,
@@ -203,6 +232,8 @@ export function useComments() {
     editComment,
     resolveComment,
     replyToComment,
+    postDrafts,
+    draftCount,
     getAnnotationsForFile,
     formatAllComments,
     copyAllComments,

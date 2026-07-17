@@ -24,7 +24,11 @@ export interface ReviewComment {
   // on whether endLine > lineNumber.
   lineContent: string
   body: string
-  status: 'open' | 'resolved'
+  // 'draft' = saved but not yet visible to the agent — suppressed from every
+  // watcher/ws broadcast (comment-added, comment-updated) until "Post
+  // drafts" or "Done reviewing" flips it to 'open' in one batch. Server-side
+  // so a draft survives a tab reload, unlike a client-only queue.
+  status: 'open' | 'resolved' | 'draft'
   createdAt: number
   replies: CommentReply[]
   // GitHub-style staleness flag, independent of status: a live file edit

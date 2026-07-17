@@ -187,14 +187,17 @@ export function createApp(
 
   const repoRoot = getRepoRoot()
 
-  // Re-anchors open, additions-side comments on `path` to their new position
-  // after a working-tree change and broadcasts the ones that moved (or went
-  // outdated) as comment-updated — the UI, `diffx watch`, and any ws agent
-  // subscriber all key off this event, so it runs server-side once instead
-  // of three times with three chances to disagree.
+  // Re-anchors non-resolved, additions-side comments on `path` to their new
+  // position after a working-tree change and broadcasts the ones that moved
+  // (or went outdated) as comment-updated — the UI, `diffx watch`, and any
+  // ws agent subscriber all key off this event, so it runs server-side once
+  // instead of three times with three chances to disagree. Drafts are
+  // re-anchored (their position stays accurate) but never broadcast — they
+  // stay invisible to every watcher until posted.
   const reanchorAndBroadcast = async (path: string) => {
     const changed = await reanchorFileComments(path, store, repoRoot)
     for (const comment of changed) {
+      if (comment.status === 'draft') continue
       void broadcast({ type: 'comment-updated', comment })
     }
   }
@@ -374,7 +377,16 @@ export function createApp(
 
   app.get('/api/comments', async (c) => {
     const comments = await store.getAll()
-    return c.json(comments)
+    // Drafts are opt-in, not opt-out: the browser UI (which renders them
+    // with a Draft badge) passes includeDrafts=true explicitly. Every other
+    // caller — `diffx comments`, and anything else hitting this endpoint
+    // without that flag — gets the agent-visible view, same as the
+    // watcher/ws broadcast suppression. Without this, `diffx comments`
+    // would leak drafts the reviewer hasn't posted yet.
+    if (c.req.query('includeDrafts') === 'true') {
+      return c.json(comments)
+    }
+    return c.json(comments.filter((comment) => comment.status !== 'draft'))
   })
 
   app.post('/api/comments', async (c) => {
@@ -393,6 +405,10 @@ export function createApp(
       rawSuggestion.newLines.every((x: unknown) => typeof x === 'string')
         ? { newLines: rawSuggestion.newLines as string[] }
         : undefined
+    // Only the UI is allowed to create a draft — status otherwise defaults
+    // to 'open'. Anything else in the field is ignored rather than trusted,
+    // same spirit as the suggestion validation above.
+    const status: 'open' | 'draft' = body.status === 'draft' ? 'draft' : 'open'
     const comment = {
       id: crypto.randomUUID(),
       filePath: body.filePath,
@@ -401,21 +417,51 @@ export function createApp(
       endLine,
       lineContent: body.lineContent,
       body: body.body,
-      status: 'open' as const,
+      status,
       createdAt: Date.now(),
       replies: [],
       ...(suggestion ? { suggestion } : {}),
     }
     const created = await store.add(comment)
-    void broadcast({ type: 'comment-added', comment: created })
+    // Drafts are invisible to the agent until posted — see postDraftsAndBroadcast.
+    if (status !== 'draft') {
+      void broadcast({ type: 'comment-added', comment: created })
+    }
     return c.json(created, 201)
+  })
+
+  // Flips every draft comment to 'open' in one batch and broadcasts
+  // comment-added for each — the moment they actually become visible to any
+  // watcher/ws subscriber. Shared by the dedicated "Post drafts" button and
+  // by /api/submit ("Done reviewing" shouldn't silently leave drafts behind).
+  const postDraftsAndBroadcast = async () => {
+    const all = await store.getAll()
+    const drafts = all.filter((c) => c.status === 'draft')
+    for (const draft of drafts) {
+      const updated = await store.update(draft.id, { status: 'open' })
+      if (updated) void broadcast({ type: 'comment-added', comment: updated })
+    }
+    return drafts.length
+  }
+
+  app.post('/api/drafts/post', async (c) => {
+    const posted = await postDraftsAndBroadcast()
+    return c.json({ ok: true, posted })
   })
 
   app.put('/api/comments/:id', async (c) => {
     const id = c.req.param('id')
     const { body, status } = await c.req.json()
+    const wasDraft = status === undefined ? undefined : (await store.getAll()).find((c) => c.id === id)?.status === 'draft'
     const updated = await store.update(id, { body, status })
     if (!updated) return c.json({ error: 'Comment not found' }, 404)
+    // A draft transitioning to open/resolved here (e.g. a one-off "post this
+    // single draft" from the UI, distinct from the batch endpoint above)
+    // needs the same comment-added catch-up broadcast, since it never got
+    // one when it was first created as a draft.
+    if (wasDraft && status !== 'draft') {
+      void broadcast({ type: 'comment-added', comment: updated })
+    }
     return c.json(updated)
   })
 
@@ -514,6 +560,9 @@ export function createApp(
   // above). Submit is idempotent on the wire; the UI is responsible for
   // greying out the button once the user has clicked it.
   app.post('/api/submit', async (c) => {
+    // Done reviewing shouldn't silently leave drafts the reviewer forgot to
+    // post stranded and invisible to the agent — post them first.
+    await postDraftsAndBroadcast()
     const ts = Date.now()
     await broadcast({ type: 'submitted', timestamp: ts })
     return c.json({ ok: true, timestamp: ts })

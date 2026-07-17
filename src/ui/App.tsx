@@ -50,7 +50,7 @@ export function App() {
     refreshMode: settings.refreshMode,
     activeFiles,
   })
-  const { comments, addComment, removeComment, replyToComment, copyAllComments } =
+  const { comments, addComment, removeComment, replyToComment, copyAllComments, postDrafts, draftCount } =
     useComments()
   const reviewState = useReviewState()
   const [activeFile, setActiveFile] = useState<string | null>(null)
@@ -272,6 +272,8 @@ export function App() {
         onRefreshModeChange={(refreshMode) => updateSettings({ refreshMode })}
         staleCount={staleFiles.size}
         onRefresh={() => (staleFiles.size > 0 ? applyAllStale() : reload())}
+        draftCount={draftCount}
+        onPostDrafts={postDrafts}
       />
       <div className="app-body">
         <aside className={`sidebar ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>

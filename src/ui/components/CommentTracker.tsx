@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Reply,
   Circle,
+  PenLine,
 } from 'lucide-react'
 import type { ReviewComment } from '../../types'
 import { timeAgo, truncate, fileName } from '../utils'
@@ -12,9 +13,10 @@ interface CommentTrackerProps {
   onJump?: (comment: ReviewComment) => void
 }
 
-type CommentStatus = 'open' | 'replied' | 'resolved'
+type CommentStatus = 'draft' | 'open' | 'replied' | 'resolved'
 
 function getCommentStatus(comment: ReviewComment): CommentStatus {
+  if (comment.status === 'draft') return 'draft'
   if (comment.status === 'resolved') return 'resolved'
   if (comment.replies?.length > 0) return 'replied'
   return 'open'
@@ -22,6 +24,12 @@ function getCommentStatus(comment: ReviewComment): CommentStatus {
 
 function StatusBadge({ status }: { status: CommentStatus }) {
   switch (status) {
+    case 'draft':
+      return (
+        <span className="ct-status ct-status-draft" title="Draft — not yet posted">
+          <PenLine size={12} />
+        </span>
+      )
     case 'open':
       return (
         <span className="ct-status ct-status-open" title="Open">
@@ -48,6 +56,7 @@ export function CommentTracker({ comments, onJump }: CommentTrackerProps) {
 
   const sorted = [...comments].sort((a, b) => b.createdAt - a.createdAt)
 
+  const draftCount = sorted.filter((c) => getCommentStatus(c) === 'draft').length
   const openCount = sorted.filter((c) => getCommentStatus(c) === 'open').length
   const repliedCount = sorted.filter((c) => getCommentStatus(c) === 'replied').length
   const resolvedCount = sorted.filter((c) => getCommentStatus(c) === 'resolved').length
@@ -58,6 +67,7 @@ export function CommentTracker({ comments, onJump }: CommentTrackerProps) {
         <MessageSquare size={14} />
         <span className="ct-title">Comments</span>
         <span className="ct-counts">
+          {draftCount > 0 && <span className="ct-count ct-count-draft">{draftCount} draft</span>}
           {openCount > 0 && <span className="ct-count ct-count-open">{openCount} open</span>}
           {repliedCount > 0 && <span className="ct-count ct-count-replied">{repliedCount} replied</span>}
           {resolvedCount > 0 && <span className="ct-count ct-count-resolved">{resolvedCount} resolved</span>}

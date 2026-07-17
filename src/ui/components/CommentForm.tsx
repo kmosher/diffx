@@ -14,6 +14,12 @@ interface CommentFormProps {
   // CodeMirror editor. Optional so reply forms (which don't suggest) can omit it.
   filePath?: string
   onSubmit: (body: string, suggestion?: { newLines: string[] }) => void
+  // "Save as draft" — posts the comment with status:'draft' instead of
+  // 'open' (server-side; see server.ts POST /api/comments). Distinct from
+  // the "draft" in this form's own lifted `pending`-map state below, which
+  // is in-progress *typing*, not yet submitted at all. Omitted for reply
+  // forms, which have no draft concept.
+  onSaveDraft?: (body: string, suggestion?: { newLines: string[] }) => void
   onCancel: () => void
   // Lifted-state hooks for drafts that must survive a remount (see the
   // `pending` draft map in CodeViewWrapper). Omitted by callers that don't
@@ -47,6 +53,7 @@ export function CommentForm({
   originalLines = '',
   filePath,
   onSubmit,
+  onSaveDraft,
   onCancel,
   initialBody,
   initialSuggestMode,
@@ -99,7 +106,10 @@ export function CommentForm({
   const submitRef = useRef<() => void>(() => {})
   const cancelRef = useRef<() => void>(onCancel)
 
-  const handleSubmit = () => {
+  // Shared by both "Comment"/"Suggest rewrite" (dispatch=onSubmit) and "Save
+  // as draft" (dispatch=onSaveDraft) — same validation and suggestion-payload
+  // logic either way, just a different endpoint on the other end.
+  const dispatch = (fn: (body: string, suggestion?: { newLines: string[] }) => void) => {
     const trimmedBody = body.trim()
     if (suggestMode) {
       // Only send a suggestion payload if the user actually edited the rewrite —
@@ -107,15 +117,19 @@ export function CommentForm({
       const changed = suggestionText !== originalLines
       if (!changed && !trimmedBody) return
       if (changed) {
-        onSubmit(trimmedBody, { newLines: suggestionText.split('\n') })
+        fn(trimmedBody, { newLines: suggestionText.split('\n') })
       } else {
-        onSubmit(trimmedBody)
+        fn(trimmedBody)
       }
       return
     }
     if (trimmedBody) {
-      onSubmit(trimmedBody)
+      fn(trimmedBody)
     }
+  }
+  const handleSubmit = () => dispatch(onSubmit)
+  const handleSaveDraft = () => {
+    if (onSaveDraft) dispatch(onSaveDraft)
   }
   submitRef.current = handleSubmit
   cancelRef.current = onCancel
@@ -209,6 +223,17 @@ export function CommentForm({
           {suggestMode ? 'Cancel suggest' : 'Suggest edit'}
         </button>
         <div style={{ flex: 1 }} />
+        {onSaveDraft && (
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSaveDraft}
+            disabled={submitDisabled}
+            title="Save without posting — stays invisible to the listening Claude session until you post it (or click Done reviewing)."
+          >
+            Save as draft
+          </button>
+        )}
         <button className="btn btn-secondary" onClick={onCancel}>
           Cancel
         </button>

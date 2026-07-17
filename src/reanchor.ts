@@ -46,10 +46,15 @@ function findBlock(fileLines: string[], blockLines: string[], hint: number, norm
 }
 
 /**
- * Remaps every open, additions-side comment on `filePath` to its new
+ * Remaps every non-resolved, additions-side comment on `filePath` to its new
  * position after a working-tree change — GitHub semantics: exact match near
  * the old position first, then a normalized fuzzy match, else the comment is
  * flagged `outdated` and left at its last-known lineNumber/endLine.
+ *
+ * Draft comments are re-anchored too (their position should stay accurate
+ * while the reviewer keeps drafting) — it's the caller's job to not
+ * broadcast comment-updated for a draft, since drafts stay invisible to
+ * every watcher/ws subscriber until posted.
  *
  * Deletion-side comments are left untouched: they're anchored to the diff's
  * "old" side (content that no longer exists in the working tree by
@@ -76,7 +81,7 @@ export async function reanchorFileComments(
   const fileLines = content !== null && content.length > 0 ? content.split('\n') : []
 
   const all = await store.getAll()
-  const targets = all.filter((c) => c.filePath === filePath && c.status === 'open' && c.side === 'additions')
+  const targets = all.filter((c) => c.filePath === filePath && c.status !== 'resolved' && c.side === 'additions')
   const changed: ReviewComment[] = []
 
   for (const comment of targets) {
