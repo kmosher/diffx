@@ -11,6 +11,7 @@ import type { CommentStore } from './comments.js'
 import { isSafePath } from './path.js'
 import { watchRepo, type RepoWatcher } from './watcher.js'
 import { reanchorFileComments } from './reanchor.js'
+import { spliceDeleteRange, spliceInsertText } from './edits.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -392,6 +393,68 @@ export function createApp(
     return c.json({ ok: true })
   })
 
+  // Small in-memory undo buffer for direct-delete edits (see POST
+  // /api/edits/delete below). Session-scoped -- it lives and dies with this
+  // server process, same as everything else that isn't explicitly persisted
+  // (see persistence.ts, which only covers comments).
+  const UNDO_BUFFER_CAP = 20
+  const undoBuffer: { id: string; filePath: string; startLine: number; startColumn: number; deletedText: string }[] = []
+
+  // Direct-delete: splices a character range out of the working-tree file
+  // (reusing the writeWorkingTreeFile path the in-browser editor uses),
+  // pushes it onto the undo buffer, re-anchors comments, and broadcasts
+  // both file-changed (so the diff view updates) and a dedicated user-edit
+  // event -- the agent's context needs to know a delete happened without
+  // re-reading the whole file to notice a few missing characters.
+  app.post('/api/edits/delete', async (c) => {
+    const body = await c.req.json()
+    const { filePath, startLine, startColumn, endLine, endColumn } = body
+    if (
+      typeof filePath !== 'string' ||
+      typeof startLine !== 'number' ||
+      typeof startColumn !== 'number' ||
+      typeof endLine !== 'number' ||
+      typeof endColumn !== 'number'
+    ) {
+      return c.json({ error: 'filePath, startLine, startColumn, endLine, endColumn required' }, 400)
+    }
+    const result = spliceDeleteRange(repoRoot, { filePath, startLine, startColumn, endLine, endColumn })
+    if (!result) {
+      return c.json({ error: 'delete failed (unsafe path, unreadable file, or range no longer matches the file on disk)' }, 400)
+    }
+
+    const undoId = crypto.randomUUID()
+    undoBuffer.push({ id: undoId, filePath, startLine, startColumn, deletedText: result.deletedText })
+    if (undoBuffer.length > UNDO_BUFFER_CAP) undoBuffer.shift()
+
+    await reanchorAndBroadcast(filePath)
+    void broadcast({ type: 'file-changed', path: filePath })
+    void broadcast({
+      type: 'user-edit',
+      action: 'delete',
+      filePath,
+      range: { startLine, startColumn, endLine, endColumn },
+      deletedText: result.deletedText,
+    })
+    return c.json({ ok: true, undoId }, 201)
+  })
+
+  app.post('/api/edits/undo', async (c) => {
+    const { id } = await c.req.json()
+    const index = undoBuffer.findIndex((e) => e.id === id)
+    if (index === -1) {
+      return c.json({ error: 'nothing to undo for that id (already undone, evicted, or never existed)' }, 404)
+    }
+    const [entry] = undoBuffer.splice(index, 1)
+    if (!spliceInsertText(repoRoot, entry.filePath, entry.startLine, entry.startColumn, entry.deletedText)) {
+      return c.json({ error: 'undo failed (file changed since the delete, or became unwritable)' }, 400)
+    }
+    await reanchorAndBroadcast(entry.filePath)
+    void broadcast({ type: 'file-changed', path: entry.filePath })
+    void broadcast({ type: 'user-edit', action: 'undo', filePath: entry.filePath, insertedText: entry.deletedText })
+    return c.json({ ok: true })
+  })
+
   app.get('/api/settings', (c) => {
     return c.json(loadSettings())
   })
@@ -450,6 +513,12 @@ export function createApp(
     // to 'open'. Anything else in the field is ignored rather than trusted,
     // same spirit as the suggestion validation above.
     const status: 'open' | 'draft' = body.status === 'draft' ? 'draft' : 'open'
+    // Schema v3 character-level anchor (see types.ts). All three or none --
+    // a comment can't be "half" character-anchored, so if selectedText is
+    // missing or the columns aren't both numbers, drop back to a plain
+    // line-level comment rather than persisting a partial/inconsistent anchor.
+    const hasCharAnchor =
+      typeof body.startColumn === 'number' && typeof body.endColumn === 'number' && typeof body.selectedText === 'string'
     const comment = {
       id: crypto.randomUUID(),
       filePath: body.filePath,
@@ -462,6 +531,9 @@ export function createApp(
       createdAt: Date.now(),
       replies: [],
       ...(suggestion ? { suggestion } : {}),
+      ...(hasCharAnchor
+        ? { startColumn: body.startColumn, endColumn: body.endColumn, selectedText: body.selectedText }
+        : {}),
     }
     const created = await store.add(comment)
     // Drafts are invisible to the agent until posted — see postDraftsAndBroadcast.
@@ -560,6 +632,9 @@ export function createApp(
   //                     in-browser editor
   //   file-written    — an explicit write (in-browser editor, or `diffx
   //                     refresh` with path:null for "everything")
+  //   user-edit       — a direct in-browser delete (or its undo) spliced
+  //                     working-tree text without going through the file
+  //                     editor modal; a context update, not a request
   //   submitted       — one-shot pulse when the user clicks "Done reviewing"
   app.get('/api/events', (c) => {
     const role: SubscriberRole = c.req.query('role') === 'cli' ? 'cli' : 'ui'

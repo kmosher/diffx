@@ -210,6 +210,10 @@ const CLIENTS_DEBOUNCE_MS = 4000
  *   {"type":"comment-updated","comment":{...}}  // re-anchored after a live
  *                                                 file edit shifted its lines,
  *                                                 or newly/no-longer outdated
+ *   {"type":"user-edit","action":"delete","filePath":"...","range":{...},"deletedText":"..."}
+ *                                                // a direct in-browser delete (or "undo") --
+ *                                                // a context update, not a request; the file
+ *                                                // already reflects it, don't re-apply it
  *   {"type":"clients","browsers":N}             // debounced browser-tab presence
  *   {"type":"submitted","timestamp":...}        // not final — watch keeps streaming after this
  *   {"type":"review-ended","reason":"idle"|"no-browser"}  // terminal
@@ -229,7 +233,7 @@ export async function cmdWatch(): Promise<void> {
   }
 
   await streamEvents('watch', (ev) => {
-    if (ev.type === 'comment-added' || ev.type === 'reply-added' || ev.type === 'comment-updated') {
+    if (ev.type === 'comment-added' || ev.type === 'reply-added' || ev.type === 'comment-updated' || ev.type === 'user-edit') {
       process.stdout.write(JSON.stringify(ev) + '\n')
     } else if (ev.type === 'submitted') {
       submitted = true

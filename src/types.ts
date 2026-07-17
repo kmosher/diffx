@@ -45,4 +45,18 @@ export interface ReviewComment {
   suggestion?: {
     newLines: string[]
   }
+  // Schema v3: optional character-level anchor, on top of the line-level
+  // anchor above (lineNumber/endLine/lineContent stay valid and are what
+  // every pre-v3 consumer already understands -- a line-only comment simply
+  // omits these three fields). When present, they narrow the comment to an
+  // exact substring: startColumn is a 0-based offset into the first
+  // anchored line (lineNumber), endColumn a 0-based *exclusive* offset into
+  // the last anchored line (endLine ?? lineNumber) -- i.e. selectedText ===
+  // the text between those two points, which may span multiple lines.
+  // selectedText is redundant with (lineContent + start/endColumn) but
+  // included directly so agent-facing rendering doesn't have to recompute
+  // a multi-line substring from column offsets.
+  startColumn?: number
+  endColumn?: number
+  selectedText?: string
 }
