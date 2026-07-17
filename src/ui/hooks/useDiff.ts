@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 export interface BinaryFileInfo {
   path: string
@@ -28,15 +28,53 @@ interface DiffData {
   fileContents: FileContentsMap
 }
 
+// Scoped shape returned by GET /api/diff?file=<path> — same fields, but
+// binaryFiles/untrackedFiles/fileContents only ever mention that one path,
+// and `patch` is just that file's fragment ('' if it has no pending diff).
+type FileDiffData = DiffData
+
 export interface DiffOptions {
   staged: boolean
   untracked: boolean
+}
+
+// Replace (or remove, or append) one file's fragment within a full unified
+// patch. Mirrors the server's extractFilePatch boundary logic so a
+// per-file refetch can be spliced back into the client's merged patch
+// without re-fetching every other file.
+function spliceFilePatch(fullPatch: string, filePath: string, fragment: string): string {
+  const lines = fullPatch ? fullPatch.split('\n') : []
+  const targetPrefix = 'diff --git a/'
+  let start = -1
+  let end = lines.length
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith(targetPrefix)) continue
+    const match = lines[i].match(/^diff --git a\/.+ b\/(.+)$/)
+    if (start === -1) {
+      if (match?.[1] === filePath) start = i
+      continue
+    }
+    end = i
+    break
+  }
+  const fragLines = fragment ? fragment.split('\n') : []
+  if (start === -1) {
+    // Not previously in the patch. Nothing to remove; append if there's
+    // something to add.
+    return fragment ? [...lines, ...fragLines].join('\n') : fullPatch
+  }
+  return [...lines.slice(0, start), ...fragLines, ...lines.slice(end)].join('\n')
 }
 
 export function useDiff(options: DiffOptions) {
   const [data, setData] = useState<DiffData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Mirrors `data` for the merge path below, which runs inside an event
+  // handler closure that would otherwise see a stale `data` from the render
+  // that registered the EventSource listener.
+  const dataRef = useRef<DiffData | null>(null)
+  dataRef.current = data
 
   const load = useCallback(() => {
     setLoading(true)
@@ -51,23 +89,60 @@ export function useDiff(options: DiffOptions) {
       .finally(() => setLoading(false))
   }, [options.staged, options.untracked])
 
+  // Targeted refetch: pull just one file's diff and splice it into the
+  // current merged state, instead of re-fetching and re-parsing everything.
+  // Falls back to a full load() if we don't have a base diff to merge into
+  // yet (e.g. the file-written event races the initial load).
+  const loadFile = useCallback(
+    (path: string) => {
+      const base = dataRef.current
+      if (!base) return load()
+      return fetch(`/api/diff?staged=${options.staged}&untracked=${options.untracked}&file=${encodeURIComponent(path)}`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`)
+          return res.json()
+        })
+        .then((json: FileDiffData) => {
+          setData((prev) => {
+            const cur = prev ?? base
+            const patch = spliceFilePatch(cur.patch, path, json.patch)
+            const binaryFiles = [...cur.binaryFiles.filter((b) => b.path !== path), ...json.binaryFiles]
+            const untrackedFiles = json.untrackedFiles.length
+              ? [...new Set([...cur.untrackedFiles, ...json.untrackedFiles])]
+              : cur.untrackedFiles.filter((f) => f !== path)
+            const fileContents = { ...cur.fileContents }
+            if (path in json.fileContents) {
+              fileContents[path] = json.fileContents[path]
+            } else {
+              delete fileContents[path]
+            }
+            return { ...cur, patch, binaryFiles, untrackedFiles, fileContents }
+          })
+        })
+        .catch((err) => setError(err.message))
+    },
+    [options.staged, options.untracked, load],
+  )
+
   useEffect(() => {
     void load()
   }, [load])
 
-  // SSE: re-fetch diff when a file is written from the browser editor.
-  // Filed-written events can also come from other sources later (e.g., agent
-  // writes); piggybacking on the existing event stream avoids a second channel.
+  // SSE: re-fetch diff when a file changes. `path: null` (the `diffx
+  // refresh` / batch fallback) triggers a full reload; a concrete path goes
+  // through the scoped per-file refetch above.
   useEffect(() => {
     const es = new EventSource('/api/events')
     es.addEventListener('message', (ev) => {
       try {
-        const data = JSON.parse(ev.data)
-        if (data.type === 'file-written') void load()
+        const parsed = JSON.parse(ev.data)
+        if (parsed.type !== 'file-written' && parsed.type !== 'file-changed') return
+        if (parsed.path) void loadFile(parsed.path)
+        else void load()
       } catch {}
     })
     return () => es.close()
-  }, [load])
+  }, [load, loadFile])
 
   return {
     patch: data?.patch ?? null,

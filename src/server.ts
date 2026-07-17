@@ -39,6 +39,31 @@ function parseFilePaths(patch: string): string[] {
   return [...paths]
 }
 
+// Slice a single file's fragment out of a multi-file unified patch, for
+// GET /api/diff?file=. Each file's fragment runs from its `diff --git` line
+// up to (but not including) the next one. Returns '' if the path has no
+// pending diff (e.g. it was reverted between the fs-watcher event firing and
+// this request landing) — the caller treats that as "nothing to show."
+function extractFilePatch(patch: string, filePath: string): string {
+  const lines = patch.split('\n')
+  const targetPrefix = `diff --git a/`
+  let start = -1
+  let end = lines.length
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith(targetPrefix)) continue
+    const match = lines[i].match(/^diff --git a\/.+ b\/(.+)$/)
+    if (start === -1) {
+      if (match?.[1] === filePath) start = i
+      continue
+    }
+    // Found the start already; this is the next file's header — stop here.
+    end = i
+    break
+  }
+  if (start === -1) return ''
+  return lines.slice(start, end).join('\n')
+}
+
 function parseBinaryFiles(patch: string, untrackedFiles?: Set<string>): BinaryFileInfo[] {
   const binaryFiles: BinaryFileInfo[] = []
   const lines = patch.split('\n')
@@ -170,6 +195,25 @@ export function createApp(
         return { oversize: true, size: buf.length }
       }
       return { contents: buf.toString('utf-8') }
+    }
+
+    // ?file=<path> scopes the response to one file — used for targeted
+    // refetches (fs-watcher / file-written events carry a path) so a change
+    // to one file doesn't require re-fetching and re-parsing the whole diff.
+    const fileFilter = c.req.query('file')
+    if (fileFilter) {
+      const fragment = extractFilePatch(patch, fileFilter)
+      return c.json({
+        patch: fragment,
+        repoName,
+        branch,
+        customMode: isCustomMode,
+        binaryFiles: binaryFiles.filter((b) => b.path === fileFilter),
+        untrackedFiles: untrackedFiles.filter((f) => f === fileFilter),
+        fileContents: binarySet.has(fileFilter)
+          ? {}
+          : { [fileFilter]: { old: readSide(fileFilter, refs.baseRef), new: readSide(fileFilter, refs.headRef) } },
+      })
     }
 
     const fileContents: Record<string, { old: SideContents; new: SideContents }> = {}

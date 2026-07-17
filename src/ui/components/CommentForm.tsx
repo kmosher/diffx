@@ -15,6 +15,17 @@ interface CommentFormProps {
   filePath?: string
   onSubmit: (body: string, suggestion?: { newLines: string[] }) => void
   onCancel: () => void
+  // Lifted-state hooks for drafts that must survive a remount (see the
+  // `pending` draft map in CodeViewWrapper). Omitted by callers that don't
+  // need persistence — reply forms, which are short-lived and never remount
+  // mid-typing — and the form falls back to plain local state seeded from
+  // the `initial*` props.
+  initialBody?: string
+  initialSuggestMode?: boolean
+  initialSuggestionText?: string
+  onBodyChange?(body: string): void
+  onSuggestModeChange?(suggestMode: boolean): void
+  onSuggestionTextChange?(text: string): void
 }
 
 function useColorScheme(): 'light' | 'dark' {
@@ -32,10 +43,39 @@ function useColorScheme(): 'light' | 'dark' {
   return scheme
 }
 
-export function CommentForm({ originalLines = '', filePath, onSubmit, onCancel }: CommentFormProps) {
-  const [body, setBody] = useState('')
-  const [suggestMode, setSuggestMode] = useState(false)
-  const [suggestionText, setSuggestionText] = useState(originalLines)
+export function CommentForm({
+  originalLines = '',
+  filePath,
+  onSubmit,
+  onCancel,
+  initialBody,
+  initialSuggestMode,
+  initialSuggestionText,
+  onBodyChange,
+  onSuggestModeChange,
+  onSuggestionTextChange,
+}: CommentFormProps) {
+  const [body, setBodyState] = useState(initialBody ?? '')
+  const [suggestMode, setSuggestModeState] = useState(initialSuggestMode ?? false)
+  const [suggestionText, setSuggestionTextState] = useState(initialSuggestionText ?? originalLines)
+  // Wrap each setter so a lifted draft (CodeViewWrapper's `pending` map)
+  // stays in sync on every keystroke without this component needing to know
+  // whether it's backed by a draft or is a fire-and-forget reply form.
+  const setBody = (v: string) => {
+    setBodyState(v)
+    onBodyChange?.(v)
+  }
+  const setSuggestMode = (v: boolean | ((prev: boolean) => boolean)) => {
+    setSuggestModeState((prev) => {
+      const next = typeof v === 'function' ? v(prev) : v
+      onSuggestModeChange?.(next)
+      return next
+    })
+  }
+  const setSuggestionText = (v: string) => {
+    setSuggestionTextState(v)
+    onSuggestionTextChange?.(v)
+  }
   const bodyRef = useRef<HTMLTextAreaElement>(null)
   const cmRef = useRef<ReactCodeMirrorRef>(null)
   const langExt = useLanguageExtension(filePath)
