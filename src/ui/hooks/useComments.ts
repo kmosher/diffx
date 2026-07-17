@@ -10,9 +10,10 @@ const xmlEscape = (s: string): string =>
 
 const lineAttr = (c: ReviewComment): string => {
   const endLine = c.endLine ?? c.lineNumber
-  return endLine > c.lineNumber
-    ? ` line="${c.lineNumber}" endLine="${endLine}"`
-    : ` line="${c.lineNumber}"`
+  const range = endLine > c.lineNumber ? ` line="${c.lineNumber}" endLine="${endLine}"` : ` line="${c.lineNumber}"`
+  // Surfaced so the agent knows this position is a best-effort re-anchor
+  // (see reanchor.ts) rather than treating it as exact.
+  return c.outdated ? `${range} outdated="true"` : range
 }
 
 // Render the diff context for a comment as one or more `<code>` lines, prefixed with

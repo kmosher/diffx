@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { UserCircle, CheckCircle2, Bot, Reply } from 'lucide-react'
+import { UserCircle, CheckCircle2, Bot, Reply, History } from 'lucide-react'
 import type { ReviewComment } from '../../types'
 import { timeAgo } from '../utils'
 import { CommentForm } from './CommentForm'
@@ -37,6 +37,15 @@ export function CommentBubble({ comment, onDelete, onReply }: CommentBubbleProps
           <span className="comment-bubble-resolved">
             <CheckCircle2 size={14} />
             Resolved
+          </span>
+        )}
+        {comment.outdated && !isResolved && (
+          <span
+            className="comment-bubble-outdated"
+            title="The lines this comment was anchored to changed and couldn't be confidently re-matched — position may be off."
+          >
+            <History size={14} />
+            Outdated
           </span>
         )}
         {!isResolved && (

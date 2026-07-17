@@ -198,13 +198,16 @@ export async function cmdWaitForSubmit(): Promise<void> {
  * Emitted line shapes (one per line, newline-terminated):
  *   {"type":"comment-added","comment":{...}}
  *   {"type":"reply-added","commentId":"...","reply":{...}}
+ *   {"type":"comment-updated","comment":{...}}  // re-anchored after a live
+ *                                                 file edit shifted its lines,
+ *                                                 or newly/no-longer outdated
  *   {"type":"submitted","timestamp":...}     // not final — watch keeps streaming after this
  */
 export async function cmdWatch(): Promise<void> {
   console.error('watch: connected — streaming comment events.')
   let submitted = false
   await streamEvents('watch', (ev) => {
-    if (ev.type === 'comment-added' || ev.type === 'reply-added') {
+    if (ev.type === 'comment-added' || ev.type === 'reply-added' || ev.type === 'comment-updated') {
       process.stdout.write(JSON.stringify(ev) + '\n')
     } else if (ev.type === 'submitted') {
       submitted = true

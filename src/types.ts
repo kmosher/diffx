@@ -27,6 +27,13 @@ export interface ReviewComment {
   status: 'open' | 'resolved'
   createdAt: number
   replies: CommentReply[]
+  // GitHub-style staleness flag, independent of status: a live file edit
+  // moved or removed the text this comment was anchored to and re-anchoring
+  // (see reanchor.ts) couldn't find a confident new position. The comment
+  // stays at its last-known lineNumber/endLine — still useful context, just
+  // not guaranteed to point at the right lines anymore. Absent/false means
+  // current.
+  outdated?: boolean
   // Optional inline-suggestion payload. When present, the comment is a
   // proposed rewrite: lineContent holds the original lines being replaced
   // (one per row in [lineNumber, endLine]); suggestion.newLines is the

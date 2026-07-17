@@ -9,6 +9,7 @@ import { InMemoryCommentStore } from './comments.js'
 import type { CommentStore } from './comments.js'
 import { isSafePath } from './path.js'
 import { watchRepo, type RepoWatcher } from './watcher.js'
+import { reanchorFileComments } from './reanchor.js'
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -140,12 +141,26 @@ export function createApp(
   }
   const broadcastState = () => broadcast({ type: 'state', ...snapshotState() })
 
+  const repoRoot = getRepoRoot()
+
+  // Re-anchors open, additions-side comments on `path` to their new position
+  // after a working-tree change and broadcasts the ones that moved (or went
+  // outdated) as comment-updated — the UI, `diffx watch`, and any ws agent
+  // subscriber all key off this event, so it runs server-side once instead
+  // of three times with three chances to disagree.
+  const reanchorAndBroadcast = async (path: string) => {
+    const changed = await reanchorFileComments(path, store, repoRoot)
+    for (const comment of changed) {
+      void broadcast({ type: 'comment-updated', comment })
+    }
+  }
+
   // Always-on fs-watcher: catches changes made outside the in-browser editor
   // (an agent's own Edit tool, `git checkout`, a build step) without relying
   // on the agent to remember to call `diffx refresh`. Content-hashed and
   // debounced in watchRepo() so it stays quiet on mtime-only churn.
-  const repoWatcher: RepoWatcher = watchRepo(getRepoRoot(), (path) => {
-    void broadcast({ type: 'file-changed', path })
+  const repoWatcher: RepoWatcher = watchRepo(repoRoot, (path) => {
+    void reanchorAndBroadcast(path).then(() => broadcast({ type: 'file-changed', path }))
   })
 
   // Bundle both file sides into /api/diff so CodeView can render with full
@@ -273,6 +288,9 @@ export function createApp(
     if (!writeWorkingTreeFile(path, contents)) {
       return c.json({ error: 'write failed (unsafe path or IO error)' }, 400)
     }
+    // Re-anchor before broadcasting file-written, so by the time watchers
+    // refetch, comment positions already reflect the edit.
+    await reanchorAndBroadcast(path)
     // Force watchers to refetch the diff so the edit appears immediately.
     void broadcast({ type: 'file-written', path })
     return c.json({ ok: true })
@@ -402,10 +420,16 @@ export function createApp(
   // SSE event stream. ?role=cli for `diffx watch` / `wait-for-submit`
   // watchers; default 'ui' for the browser. Event types on the wire:
   //   state          — subscriber-count snapshot (UI uses it to gate Submit)
-  //   comment-added  — new comment from any source
-  //   reply-added    — new reply from the UI (agent-posted replies suppressed
-  //                    to avoid feeding the agent's own watch loop)
-  //   submitted      — one-shot pulse when the user clicks "Done reviewing"
+  //   comment-added   — new comment from any source
+  //   comment-updated — a comment was re-anchored after a live file edit
+  //                     (see reanchor.ts), or its outdated flag flipped
+  //   reply-added     — new reply from the UI (agent-posted replies suppressed
+  //                     to avoid feeding the agent's own watch loop)
+  //   file-changed    — fs-watcher detected an on-disk change outside the
+  //                     in-browser editor
+  //   file-written    — an explicit write (in-browser editor, or `diffx
+  //                     refresh` with path:null for "everything")
+  //   submitted       — one-shot pulse when the user clicks "Done reviewing"
   app.get('/api/events', (c) => {
     const role: SubscriberRole = c.req.query('role') === 'cli' ? 'cli' : 'ui'
     return streamSSE(c, async (stream) => {
