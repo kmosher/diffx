@@ -241,9 +241,15 @@ export async function cmdWatch(): Promise<void> {
       // Terminal event — exit now instead of waiting for the connection to
       // close. The server tears itself down right after broadcasting this,
       // and holding our SSE stream open only delays (older builds: deadlocks)
-      // that shutdown.
+      // that shutdown. The server sends this on idle shutdown even after a
+      // "Done reviewing" click, so it only means "left without submitting"
+      // (exit 3) when no submitted pulse preceded it.
       if (clientsDebounce) clearTimeout(clientsDebounce)
       process.stdout.write(JSON.stringify(ev) + '\n')
+      if (submitted) {
+        console.error('watch: server shut down after Done reviewing.')
+        process.exit(0)
+      }
       console.error('watch: reviewer left without submitting.')
       process.exit(3)
     } else if (ev.type === 'state') {
