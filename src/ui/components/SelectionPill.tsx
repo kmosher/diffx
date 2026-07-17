@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from 'react'
 import { MessageSquare, X } from 'lucide-react'
 
 interface SelectionPillProps {
@@ -16,10 +17,31 @@ interface SelectionPillProps {
 // CodeViewWrapper's onDeleteRange). Fixed-position so it isn't affected by
 // CodeView's own internal scroll virtualization.
 export function SelectionPill({ x, y, onComment, onDelete }: SelectionPillProps) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: x, top: y })
+
+  // A selection ending near the pane edge puts the raw anchor point outside
+  // (or half outside) the viewport. Clamp after measuring the rendered size;
+  // useLayoutEffect runs pre-paint, so the unclamped position never flashes.
+  // Near the bottom edge, flip above the anchor instead of just clamping so
+  // the pill doesn't cover the selection's last line.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const MARGIN = 8
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    const left = Math.max(MARGIN, Math.min(x, window.innerWidth - w - MARGIN))
+    let top = y
+    if (top + h > window.innerHeight - MARGIN) top = y - h - 28
+    setPos({ left, top: Math.max(MARGIN, top) })
+  }, [x, y])
+
   return (
     <div
+      ref={ref}
       className="selection-pill"
-      style={{ position: 'fixed', left: x, top: y }}
+      style={{ position: 'fixed', left: pos.left, top: pos.top }}
       // Selecting again inside the pill (e.g. clicking) shouldn't collapse
       // the underlying text selection before the click handler reads it —
       // mousedown is where browsers normally clear a selection on
