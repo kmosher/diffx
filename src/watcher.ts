@@ -61,6 +61,20 @@ export function watchRepo(root: string, onChange: (path: string) => void): RepoW
     persistent: true,
   })
   watcher.on('add', schedule).on('change', schedule).on('unlink', schedule)
+  // chokidar's FSWatcher is a Node EventEmitter: an 'error' event with no
+  // listener throws and takes the whole process down (EMFILE from running
+  // out of file descriptors, a permissions error mid-walk, etc. are all
+  // realistic here, not hypothetical). Losing live-refresh capability is
+  // degraded, not fatal — log once, stop watching, and let the rest of the
+  // server (diff, comments, submit) keep working without it.
+  let loggedError = false
+  watcher.on('error', (err) => {
+    if (!loggedError) {
+      loggedError = true
+      console.error('diffx: fs-watcher error, live refresh disabled for this session:', err)
+    }
+    void watcher.close()
+  })
 
   return {
     close: () => watcher.close(),
