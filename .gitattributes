@@ -1,0 +1,5 @@
+# A raw NUL byte shipped in CodeViewWrapper.tsx's history, which makes git's
+# binary heuristic classify the file as binary and diff it as "Binary file
+# changed". Source files are always text; force real diffs.
+*.ts diff
+*.tsx diff

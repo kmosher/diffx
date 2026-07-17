@@ -1,4 +1,4 @@
-import { memo, useMemo, forwardRef } from 'react'
+import { memo, useMemo, useRef, useEffect, forwardRef } from 'react'
 import type { FileDiffMetadata, DiffLineAnnotation, AnnotationSide } from '@pierre/diffs'
 import type { ReviewComment } from '../../types'
 import type { BinaryFileInfo } from '../hooks/useDiff'
@@ -86,6 +86,34 @@ export const DiffViewer = memo(
       return { textFiles: text, binaryFileEntries: bins }
     }, [files, binaryFiles])
 
+    // The binary band can't live inside CodeView's scroller (the Virtualizer
+    // takes root.firstElementChild as its content container), so fake it
+    // scrolling away: pull the band up by the code scroller's scrollTop, like
+    // a collapsing header. Scrolling back to the top brings it back.
+    const binariesRef = useRef<HTMLDivElement>(null)
+    const hasBinaries = binaryFileEntries.length > 0
+    useEffect(() => {
+      const band = binariesRef.current
+      if (!band) return
+      const surface = band.parentElement?.querySelector<HTMLElement>('.codeview-surface')
+      if (!surface) return
+      let raf = 0
+      const apply = () => {
+        raf = 0
+        const y = Math.min(surface.scrollTop, band.offsetHeight)
+        band.style.marginTop = `-${y}px`
+      }
+      const onScroll = () => {
+        if (!raf) raf = requestAnimationFrame(apply)
+      }
+      surface.addEventListener('scroll', onScroll, { passive: true })
+      apply()
+      return () => {
+        surface.removeEventListener('scroll', onScroll)
+        if (raf) cancelAnimationFrame(raf)
+      }
+    }, [hasBinaries])
+
     if (textFiles.length === 0 && binaryFileEntries.length === 0) {
       return (
         <div className="empty-state">
@@ -102,7 +130,7 @@ export const DiffViewer = memo(
           // capped, scrollable band — otherwise a stack of tall image previews
           // fills the viewport and pins the code scroller below the fold, with
           // no way to scroll past until each is marked viewed.
-          <div className="diff-viewer-binaries">
+          <div className="diff-viewer-binaries" ref={binariesRef}>
             {binaryFileEntries.map(({ file, info }) => (
               <BinaryFileDiff
                 key={file.name}

@@ -385,6 +385,10 @@ body {
     flex-direction: column;
     flex: 1;
     min-height: 0;
+    /* The binary band collapses via negative margin-top as the code scrolls
+       (see DiffViewer); clip so it slides out of view instead of painting
+       over the toolbar. */
+    overflow: clip;
 }
 
 /* Binary previews live outside CodeView's scroller, so cap them to their own
