@@ -1,5 +1,12 @@
 # diffx glow-up: live review, presence, and direct manipulation
 
+> **Status: implemented** (all stages landed as of `3aa05d6`, 2026-07-17).
+> One deviation from the plan below: Stage 4 kept `diffx watch` as an SSE
+> fallback for humans, but it was retired entirely once `/api/events-ws`
+> proved out — its exit-code contract moved to ws close semantics (see
+> `skills/diffx/SKILL.md` Step 5), and `diffx wait-for-submit` remains the
+> batch-flow entry point. This doc is retained as design rationale.
+
 Design plan for a coordinated set of changes to diffx (`~/ai-tools/diffx`).
 Goal: make diffx work equally well for its two real usage modes — (1) bespoke
 diffs scoped to a question for the agent, (2) pair-programming on the tip of a
