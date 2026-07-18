@@ -16,9 +16,10 @@ use std::time::Duration;
 
 const DEBOUNCE_MS: u64 = 200;
 
-/// Directory names ignored anywhere in the path. v1's set plus `target`
-/// (cargo build churn — krit reviewing its own repo would otherwise spray
-/// events on every build).
+/// Fast-path component filter, checked before the git-aware one: .git is
+/// never gitignored (so check-ignore wouldn't catch it), and the other names
+/// are hot enough (installs, builds, sibling worktrees) that skipping the
+/// subprocess matters when they churn.
 fn is_ignored(rel: &Path) -> bool {
     rel.components().any(|c| {
         matches!(
@@ -26,6 +27,20 @@ fn is_ignored(rel: &Path) -> bool {
             Some(".git") | Some("node_modules") | Some(".claude") | Some("target")
         )
     })
+}
+
+/// The repo's own opinion: anything .gitignore (or global excludes) would
+/// ignore, the watcher ignores too — build artifacts like dist/ stop
+/// generating events without krit hardcoding every ecosystem's output dir.
+/// One subprocess per post-debounce changed path is noise-level cost.
+fn is_git_ignored(root: &Path, rel: &Path) -> bool {
+    std::process::Command::new("git")
+        .args(["check-ignore", "-q", "--"])
+        .arg(rel)
+        .current_dir(root)
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 pub struct RepoWatcher {
@@ -73,7 +88,7 @@ pub fn watch_repo(
                     let Ok(rel) = path.strip_prefix(&handler_root) else {
                         continue;
                     };
-                    if is_ignored(rel) || path.is_dir() {
+                    if is_ignored(rel) || path.is_dir() || is_git_ignored(&handler_root, rel) {
                         continue;
                     }
                     let rel_str = rel.to_string_lossy().into_owned();
