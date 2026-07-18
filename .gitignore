@@ -1,3 +1,5 @@
 node_modules
 /dist
 .pnpm-store
+krit/target/
+krit/Cargo.lock
