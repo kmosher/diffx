@@ -136,6 +136,7 @@ pub fn reanchor_file_comments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::CommentStore;
 
     const FILE: &[&str] = &[
         "fn main() {",
@@ -168,5 +169,101 @@ mod tests {
         assert_eq!(find_block(FILE, &["gone"], 1, true), None);
         assert_eq!(find_block(FILE, &[], 1, false), None);
         assert_eq!(find_block(&[], &["x"], 1, false), None);
+    }
+
+    // ---- reanchor_file_comments (the store-mutating wrapper) ----
+
+    fn comment(id: &str, line: u32, line_content: &str, side: &str, status: &str) -> ReviewComment {
+        ReviewComment {
+            id: id.into(),
+            file_path: "f.rs".into(),
+            side: side.into(),
+            line_number: line,
+            end_line: Some(line),
+            line_content: line_content.into(),
+            body: "b".into(),
+            status: status.into(),
+            created_at: 0,
+            replies: Vec::new(),
+            outdated: None,
+            suggestion: None,
+            start_column: None,
+            end_column: None,
+            selected_text: None,
+        }
+    }
+
+    fn temp_root_with(name: &str, bytes: &[u8]) -> std::path::PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("krit-reanchor-{}-{}", std::process::id(), name));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("f.rs"), bytes).unwrap();
+        dir
+    }
+
+    #[test]
+    fn remaps_moved_comment_and_reports_it() {
+        // Comment anchored to "let b = 2;" at line 2; file now has it at line 4.
+        let root = temp_root_with("moved", b"a\nx\ny\nlet b = 2;\nz");
+        let mut store = CommentStore::new(None);
+        store.add(comment("c", 2, "let b = 2;", "additions", "open"));
+
+        let changed = reanchor_file_comments("f.rs", &mut store, &root);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].line_number, 4);
+        assert_eq!(changed[0].end_line, Some(4));
+        assert_eq!(changed[0].outdated, Some(false));
+    }
+
+    #[test]
+    fn flags_vanished_comment_outdated_once() {
+        let root = temp_root_with("gone", b"totally\ndifferent\nfile");
+        let mut store = CommentStore::new(None);
+        store.add(comment("c", 1, "let b = 2;", "additions", "open"));
+
+        let changed = reanchor_file_comments("f.rs", &mut store, &root);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].outdated, Some(true));
+
+        // Already-outdated on a second pass is a no-op (not re-reported).
+        let again = reanchor_file_comments("f.rs", &mut store, &root);
+        assert!(again.is_empty());
+    }
+
+    #[test]
+    fn leaves_resolved_and_deletion_side_comments_alone() {
+        let root = temp_root_with("skip", b"nothing matches here");
+        let mut store = CommentStore::new(None);
+        store.add(comment(
+            "resolved",
+            1,
+            "let b = 2;",
+            "additions",
+            "resolved",
+        ));
+        store.add(comment("deletion", 1, "let b = 2;", "deletions", "open"));
+
+        let changed = reanchor_file_comments("f.rs", &mut store, &root);
+        assert!(changed.is_empty());
+        // Neither was flagged outdated.
+        assert_eq!(store.get("resolved").unwrap().outdated, None);
+        assert_eq!(store.get("deletion").unwrap().outdated, None);
+    }
+
+    #[test]
+    fn invalid_utf8_does_not_blanket_outdate() {
+        // Regression: a strict read used to blank the whole file on a stray
+        // non-UTF-8 byte, spuriously outdating every comment. Lossy decode
+        // keeps the intact anchor line matchable.
+        let mut bytes = b"header\nlet b = 2;\n".to_vec();
+        bytes.push(0xff); // invalid UTF-8, on its own trailing line
+        let root = temp_root_with("lossy", &bytes);
+        let mut store = CommentStore::new(None);
+        store.add(comment("c", 2, "let b = 2;", "additions", "open"));
+
+        let changed = reanchor_file_comments("f.rs", &mut store, &root);
+        // The anchor is still at line 2 → nothing moved, nothing outdated.
+        assert!(changed.is_empty());
+        assert_ne!(store.get("c").unwrap().outdated, Some(true));
     }
 }

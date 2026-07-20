@@ -189,6 +189,60 @@ mod tests {
     }
 
     #[test]
+    fn delete_across_multiple_lines() {
+        // Delete from mid-line 1 through mid-line 3, stitching the ends.
+        let (root, file) = temp_repo("multi-del.txt", "aaXbb\ncccc\ndYeee\nkeep");
+        let deleted = splice_delete_range(
+            &root,
+            &DeleteRange {
+                file_path: file.clone(),
+                start_line: 1,
+                start_column: 2, // after "aa"
+                end_line: 3,
+                end_column: 1, // before "Yeee"
+            },
+        );
+        assert_eq!(deleted.as_deref(), Some("Xbb\ncccc\nd"));
+        let after = std::fs::read_to_string(root.join(&file)).unwrap();
+        assert_eq!(after, "aaYeee\nkeep");
+    }
+
+    #[test]
+    fn insert_multiline_text_stitches_ends() {
+        let (root, file) = temp_repo("multi-ins.txt", "aabb\nkeep");
+        // Insert "X\nY\nZ" between "aa" and "bb" on line 1.
+        assert!(splice_insert_text(&root, &file, 1, 2, "X\nY\nZ"));
+        let after = std::fs::read_to_string(root.join(&file)).unwrap();
+        assert_eq!(after, "aaX\nY\nZbb\nkeep");
+    }
+
+    #[test]
+    fn delete_then_undo_round_trips_multiline() {
+        let (root, file) = temp_repo("roundtrip.txt", "one\ntwo\nthree");
+        let deleted = splice_delete_range(
+            &root,
+            &DeleteRange {
+                file_path: file.clone(),
+                start_line: 1,
+                start_column: 3,
+                end_line: 3,
+                end_column: 0,
+            },
+        )
+        .unwrap();
+        assert_eq!(deleted, "\ntwo\n");
+        assert_eq!(
+            std::fs::read_to_string(root.join(&file)).unwrap(),
+            "onethree"
+        );
+        assert!(splice_insert_text(&root, &file, 1, 3, &deleted));
+        assert_eq!(
+            std::fs::read_to_string(root.join(&file)).unwrap(),
+            "one\ntwo\nthree"
+        );
+    }
+
+    #[test]
     fn out_of_range_columns_refuse_rather_than_panic() {
         let (root, file) = temp_repo("short.txt", "ab");
         let result = splice_delete_range(

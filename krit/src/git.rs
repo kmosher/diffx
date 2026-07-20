@@ -112,9 +112,33 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|&b| b == 0)
 }
 
+/// One untracked file's synthesized new-file patch. Byte shape (headers,
+/// sentinel index line, `@@` count, `+`-prefixed body) matches v1 exactly —
+/// the UI parses this, so it's the frozen contract. `unreadable` files render
+/// as the binary placeholder (v1's isBinaryFile reported true on read error).
+fn synthesize_untracked_patch(file: &str, bytes: &[u8], unreadable: bool) -> String {
+    if unreadable || looks_binary(bytes) {
+        return format!(
+            "diff --git a/{file} b/{file}\nnew file mode 100644\nindex 0000000..0000001\nBinary files /dev/null and b/{file} differ"
+        );
+    }
+    let content = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = content.split('\n').collect();
+    let mut patch = format!(
+        "diff --git a/{file} b/{file}\nnew file mode 100644\nindex 0000000..0000001\n--- /dev/null\n+++ b/{file}\n@@ -0,0 +1,{} @@",
+        lines.len()
+    );
+    for l in &lines {
+        patch.push('\n');
+        patch.push('+');
+        patch.push_str(l);
+    }
+    patch
+}
+
 // Untracked files have no git diff; synthesize a new-file patch per file so
-// they render like any other addition. Shape (headers, sentinel index line,
-// the leading '\n') matches v1 byte-for-byte — the UI parses this.
+// they render like any other addition. The whole block gets a leading '\n'
+// so it joins onto the tracked-diff parts — matches v1 byte-for-byte.
 fn untracked_files_diff(root: &Path) -> String {
     let files = untracked_file_paths(root);
     if files.is_empty() {
@@ -122,32 +146,13 @@ fn untracked_files_diff(root: &Path) -> String {
     }
     let mut patches: Vec<String> = Vec::new();
     for file in files {
-        let abs = root.join(&file);
-        // An unreadable file renders as the binary placeholder (matching v1,
-        // whose isBinaryFile reported true on read error) — it must not
-        // vanish from the patch while still listed in untrackedFiles.
-        let (bytes, unreadable) = match std::fs::read(&abs) {
+        // An unreadable file must not vanish from the patch while still
+        // listed in untrackedFiles — it renders as the binary placeholder.
+        let (bytes, unreadable) = match std::fs::read(root.join(&file)) {
             Ok(b) => (b, false),
             Err(_) => (Vec::new(), true),
         };
-        if unreadable || looks_binary(&bytes) {
-            patches.push(format!(
-                "diff --git a/{file} b/{file}\nnew file mode 100644\nindex 0000000..0000001\nBinary files /dev/null and b/{file} differ"
-            ));
-        } else {
-            let content = String::from_utf8_lossy(&bytes);
-            let lines: Vec<&str> = content.split('\n').collect();
-            let mut patch = format!(
-                "diff --git a/{file} b/{file}\nnew file mode 100644\nindex 0000000..0000001\n--- /dev/null\n+++ b/{file}\n@@ -0,0 +1,{} @@",
-                lines.len()
-            );
-            for l in &lines {
-                patch.push('\n');
-                patch.push('+');
-                patch.push_str(l);
-            }
-            patches.push(patch);
-        }
+        patches.push(synthesize_untracked_patch(&file, &bytes, unreadable));
     }
     if patches.is_empty() {
         String::new()
@@ -293,5 +298,50 @@ mod tests {
         assert!(!looks_binary(b"plain text\n"));
         assert!(looks_binary(b"has\0nul"));
         assert!(!looks_binary(&[]));
+    }
+
+    // Golden byte-shape for the synthesized untracked-file patch — this is the
+    // frozen v1 wire contract the UI parses. A whitespace or header change
+    // here breaks rendering with no other test failing.
+    #[test]
+    fn untracked_patch_text_golden() {
+        assert_eq!(
+            synthesize_untracked_patch("src/new.rs", b"line1\nline2", false),
+            "diff --git a/src/new.rs b/src/new.rs\n\
+             new file mode 100644\n\
+             index 0000000..0000001\n\
+             --- /dev/null\n\
+             +++ b/src/new.rs\n\
+             @@ -0,0 +1,2 @@\n\
+             +line1\n\
+             +line2"
+        );
+    }
+
+    #[test]
+    fn untracked_patch_trailing_newline_counts_as_line() {
+        // "a\n" splits into ["a", ""] → 2 lines, matching git/v1.
+        assert_eq!(
+            synthesize_untracked_patch("f", b"a\n", false),
+            "diff --git a/f b/f\n\
+             new file mode 100644\n\
+             index 0000000..0000001\n\
+             --- /dev/null\n\
+             +++ b/f\n\
+             @@ -0,0 +1,2 @@\n\
+             +a\n\
+             +"
+        );
+    }
+
+    #[test]
+    fn untracked_patch_binary_and_unreadable_use_placeholder() {
+        let expected = "diff --git a/x b/x\n\
+             new file mode 100644\n\
+             index 0000000..0000001\n\
+             Binary files /dev/null and b/x differ";
+        assert_eq!(synthesize_untracked_patch("x", b"\0\x01", false), expected);
+        // Unreadable (empty bytes + flag) still renders, doesn't vanish.
+        assert_eq!(synthesize_untracked_patch("x", b"", true), expected);
     }
 }
