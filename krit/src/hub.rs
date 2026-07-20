@@ -4,9 +4,16 @@
 //! not transport handlers' — v1's hardest bugs lived in that gap.
 
 use crate::types::Event;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::sync::{Notify, broadcast};
+
+/// Broadcast depth. Receivers treat Lagged as "skip the missed frames", so an
+/// overrun silently drops events (worst case a missed `submitted`). Sized so
+/// a mass-checkout burst — one file-changed per touched file plus one
+/// comment-updated per re-anchored comment in a single debounce tick —
+/// doesn't overrun a momentarily slow subscriber.
+const BUS_CAPACITY: usize = 2048;
 
 /// Grace period after the last browser tab disconnects before the server
 /// shuts itself down — long enough to survive a page refresh. Keyed on
@@ -31,14 +38,21 @@ pub struct Hub {
     cli: AtomicUsize,
     agent: AtomicUsize,
     ever_had_browser: AtomicBool,
-    // Bumped whenever browser presence changes; an armed idle timer only
-    // fires if the generation it captured is still current. This is the
-    // whole cancellation story — no timer handles to juggle.
+    // Bumped on every subscriber connect/disconnect, any role (check_idle
+    // runs on each); an armed idle timer only fires if the generation it
+    // captured is still current — so CLI/agent churn also re-arms the 60s
+    // window, not just browser transitions. This is the whole cancellation
+    // story: no timer handles to juggle.
     idle_gen: AtomicU64,
     shutting_down: AtomicBool,
     /// Signalled once the review-ended broadcast is out; axum's graceful
     /// shutdown waits on this.
     pub shutdown: Notify,
+    /// Run by the hard-exit fallback in initiate_shutdown (state-file
+    /// removal). The graceful path cleans up in serve() after axum drains;
+    /// the 2s belt-and-suspenders exit would otherwise leave a stale state
+    /// file pointing at a dead pid.
+    exit_cleanup: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 /// RAII subscription: dropping it (stream torn down, socket closed, task
@@ -59,7 +73,7 @@ impl Drop for SubGuard {
 
 impl Hub {
     pub fn new() -> Arc<Self> {
-        let (tx, _) = broadcast::channel(256);
+        let (tx, _) = broadcast::channel(BUS_CAPACITY);
         Arc::new(Self {
             tx,
             ui: AtomicUsize::new(0),
@@ -69,7 +83,12 @@ impl Hub {
             idle_gen: AtomicU64::new(0),
             shutting_down: AtomicBool::new(false),
             shutdown: Notify::new(),
+            exit_cleanup: Mutex::new(None),
         })
+    }
+
+    pub fn set_exit_cleanup(&self, f: impl FnOnce() + Send + 'static) {
+        *self.exit_cleanup.lock().unwrap_or_else(|e| e.into_inner()) = Some(Box::new(f));
     }
 
     fn counter(&self, role: Role) -> &AtomicUsize {
@@ -80,6 +99,9 @@ impl Hub {
         }
     }
 
+    /// Order is (cli, ui, agent). On the wire cli surfaces as
+    /// `watcherCount` — the v1 name, from when SSE role=cli was
+    /// `diffx watch`.
     pub fn counts(&self) -> (usize, usize, usize) {
         (
             self.cli.load(Ordering::SeqCst),
@@ -174,6 +196,16 @@ impl Hub {
             tokio::time::sleep(std::time::Duration::from_millis(300)).await;
             hub.shutdown.notify_waiters();
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            // Graceful drain stalled (e.g. a client not reading its socket);
+            // run the cleanup the normal exit path would have.
+            let cleanup = hub
+                .exit_cleanup
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take();
+            if let Some(f) = cleanup {
+                f();
+            }
             std::process::exit(0);
         });
     }

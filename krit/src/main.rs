@@ -73,6 +73,14 @@ fn main() {
             run_subcommand(&raw_args[idx..]);
             return;
         }
+        // Retirement stub, mirroring v1's `diffx watch` stub: without it,
+        // `krit watch` would fall through to the server path with `watch` as
+        // a git-diff ref and launch an empty review.
+        if is_before_dash_dash && raw_args[idx] == "watch" {
+            eprintln!("`krit watch` is not a subcommand. Subscribe to the event stream directly:");
+            eprintln!("  ws://localhost:<port>/api/events-ws   (port from `krit state`)");
+            std::process::exit(2);
+        }
     }
 
     let mut port_arg: Option<u16> = None;
@@ -145,17 +153,13 @@ fn run_subcommand(args: &[String]) {
             }
             subcommands::cmd_comments(filter);
         }
-        "reply" => {
-            let (Some(id), body) = (rest.first(), rest[1.min(rest.len())..].join(" ")) else {
-                eprintln!("Usage: krit reply <comment-id> <text>");
-                std::process::exit(1);
-            };
-            if body.is_empty() {
+        "reply" => match rest {
+            [id, body @ ..] if !body.is_empty() => subcommands::cmd_reply(id, &body.join(" ")),
+            _ => {
                 eprintln!("Usage: krit reply <comment-id> <text>");
                 std::process::exit(1);
             }
-            subcommands::cmd_reply(id, &body);
-        }
+        },
         "resolve" => match rest.first() {
             Some(id) => subcommands::cmd_resolve(id),
             None => {
@@ -209,6 +213,18 @@ async fn serve(
     let bind_addr = format!("{}:{}", host, port_arg.unwrap_or(0));
     let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
         Ok(l) => l,
+        // v1 parity: a busy requested port falls back to a random free one —
+        // the state file advertises whatever port we actually got.
+        Err(err) if port_arg.is_some() => {
+            eprintln!("Port {bind_addr} unavailable ({err}); using a random free port instead.");
+            match tokio::net::TcpListener::bind(format!("{host}:0")).await {
+                Ok(l) => l,
+                Err(err) => {
+                    eprintln!("Error: cannot bind {host}:0: {err}");
+                    std::process::exit(1);
+                }
+            }
+        }
         Err(err) => {
             eprintln!("Error: cannot bind {bind_addr}: {err}");
             std::process::exit(1);
@@ -255,6 +271,13 @@ async fn serve(
     }
 
     hub.start_no_browser_timer();
+    {
+        // Belt-and-suspenders exit path (stalled graceful drain) must clean
+        // the state file too, or later subcommands chase a dead pid.
+        let state_path = state_path.clone();
+        let pid = std::process::id();
+        hub.set_exit_cleanup(move || remove_state_if_owned(pid, &state_path));
+    }
 
     let open_url = if host == "0.0.0.0" {
         format!("http://127.0.0.1:{actual_port}")
@@ -329,9 +352,9 @@ fn launch_review_ui(url: &str) {
             deep_link.push_str(&format!("&title={}", urlencode(&title)));
         }
         match open::that(&deep_link) {
-            Ok(()) => println!(
-                "Opened the diffx app. It's now waiting for you to leave inline comments."
-            ),
+            Ok(()) => {
+                println!("Opened the diffx app. It's now waiting for you to leave inline comments.")
+            }
             Err(err) => eprintln!(
                 "Could not reach the diffx app ({err}); is it installed? Falling back to the URL."
             ),

@@ -20,6 +20,12 @@ and gives v1 and v2 disjoint namespaces so they can run side by side.
   implementation — so the frontend and backend tracks proceed independently,
   and either backend can serve either UI build. Additive changes allowed;
   breaking changes require moving UI + skill + server together.
+  - **One deliberate v2 narrowing**: the agent ws stream (`/api/events-ws`)
+    delivers only human-originated frames — `file-changed`, `comment-updated`,
+    and the agent's own `file-written{path:null}` refresh echo are filtered
+    out (v1 forwarded everything). Consequence: agents don't see re-anchor
+    position updates and must re-fetch via `krit comments` before acting on
+    an old comment id. The UI SSE stream is unchanged.
 - **Single static binary, UI embedded** (`rust-embed`). Eliminates the
   stale-dist class of failure entirely: no `dist/`, no node_modules, no runtime
   on PATH.
@@ -36,16 +42,17 @@ and gives v1 and v2 disjoint namespaces so they can run side by side.
   testable without HTTP.
 - **Protocol as a type**: `#[serde(tag = "type")] enum Event` shared by every
   producer and consumer in the crate.
-- **Store as a single-writer actor**: one task owns the comment store; handlers
-  and the watcher talk to it over a message channel. Re-anchoring
-  (exact-match near old position → fuzzy → `outdated`) is a pure function with
-  property tests.
+- **Store as a single writer**: the comment store lives behind one mutex and
+  persists on every mutation. Re-anchoring (exact-match near old position →
+  fuzzy → `outdated`) keeps its matching core (`find_block`) pure and
+  unit-tested; the application step mutates the store under that lock.
 - **Watcher**: `notify` (FSEvents) + `notify-debouncer-full`; ignore rules for
   `.git`, `node_modules`, `.claude` carried over from v1.
 - **Transports first-class in axum**: SSE as a typed response, ws as a
   `WebSocketUpgrade` route — no upgrade-handler sidecar.
-- **Every exit path logs its reason** to a log file next to the state file.
-  (v1's silent-SIGTERM forensics motivated this.)
+- **Every exit path prints its reason** to stdout/stderr and cleans the state
+  file — including the hard-exit fallback. (v1's silent-SIGTERM forensics
+  motivated this; no separate log file exists.)
 - Shutdown: broadcast `review-ended`, close subscriber streams explicitly,
   then a bounded-grace exit. The v1 idle-shutdown deadlock
   (close waiting on live streams) must be unrepresentable in the design, not

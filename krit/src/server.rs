@@ -55,6 +55,14 @@ pub struct Inner {
 
 pub type AppState = Arc<Inner>;
 
+/// Poison-tolerant lock: one panicked handler must not brick every later
+/// request for the session. The guarded values stay internally consistent
+/// across a panic (single-writer mutations; worst case a lost in-flight
+/// update), so recovering the guard is safe.
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub fn new_state(
     hub: Arc<Hub>,
     store: CommentStore,
@@ -77,7 +85,7 @@ pub fn new_state(
 /// but never broadcast. Sync on purpose: callable from the watcher thread.
 pub fn reanchor_and_broadcast(state: &AppState, path: &str) {
     let changed = {
-        let mut store = state.store.lock().unwrap();
+        let mut store = lock(&state.store);
         reanchor_file_comments(path, &mut store, &state.repo_root)
     };
     for comment in changed {
@@ -201,7 +209,7 @@ fn read_side(root: &std::path::Path, path: &str, git_ref: &str) -> Value {
     let Some(buf) = git::file_content_at_ref(root, path, git_ref) else {
         return json!({ "missing": true });
     };
-    if buf.iter().take(8192).any(|&b| b == 0) {
+    if git::looks_binary(&buf) {
         return json!({ "binary": true });
     }
     if buf.len() > FILE_TEXT_CAP_BYTES {
@@ -221,13 +229,9 @@ async fn api_diff(
         .map(|v| v == "true")
         .unwrap_or(false);
 
-    let (patch, refs) = if let Some(args) = &state.custom_diff_args {
-        (
-            git::custom_git_diff(args),
-            git::resolve_diff_refs(Some(args)),
-        )
+    let patch_result = if let Some(args) = &state.custom_diff_args {
+        git::custom_git_diff(args).map(|p| (p, git::resolve_diff_refs(Some(args))))
     } else {
-        let patch = git::git_diff(staged, untracked, &state.repo_root);
         // Refs must mirror what git_diff actually covered so the client can
         // reproduce the patch from the bundled contents (see v1's table).
         let refs = if staged && untracked {
@@ -240,13 +244,25 @@ async fn api_diff(
                 git::WORKING_TREE_REF.to_string(),
             )
         };
-        (patch, refs)
+        git::git_diff(staged, untracked, &state.repo_root).map(|p| (p, refs))
+    };
+    // A failed git diff (typo'd ref, unreadable object) is an error the
+    // reviewer must see — not an empty "no changes" review (v1 threw a 500).
+    let (patch, refs) = match patch_result {
+        Ok(pr) => pr,
+        Err(msg) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(json!({"error": format!("git diff failed: {msg}")})),
+            )
+                .into_response();
+        }
     };
 
     let repo_name = git::repo_name();
     let branch = git::branch_name();
     let untracked_files: Vec<String> = if untracked {
-        git::untracked_file_paths()
+        git::untracked_file_paths(&state.repo_root)
     } else {
         Vec::new()
     };
@@ -399,7 +415,7 @@ async fn api_edits_delete(
 
     let undo_id = uuid::Uuid::new_v4().to_string();
     {
-        let mut undo = state.undo.lock().unwrap();
+        let mut undo = lock(&state.undo);
         undo.push(UndoEntry {
             id: undo_id.clone(),
             file_path: file_path.to_string(),
@@ -441,7 +457,7 @@ async fn api_edits_undo(
 ) -> Response {
     let id = body["id"].as_str().unwrap_or_default().to_string();
     let entry = {
-        let mut undo = state.undo.lock().unwrap();
+        let mut undo = lock(&state.undo);
         match undo.iter().position(|e| e.id == id) {
             Some(idx) => undo.remove(idx),
             None => {
@@ -489,7 +505,7 @@ async fn api_settings_put(axum::Json(body): axum::Json<Value>) -> Response {
 }
 
 async fn api_viewed_get(State(state): State<AppState>) -> Response {
-    let viewed = state.viewed.lock().unwrap();
+    let viewed = lock(&state.viewed);
     axum::Json(viewed.iter().cloned().collect::<Vec<_>>()).into_response()
 }
 
@@ -499,7 +515,7 @@ async fn api_viewed_put(
 ) -> Response {
     let file_path = body["filePath"].as_str().unwrap_or_default().to_string();
     let viewed_flag = body["viewed"].as_bool().unwrap_or(false);
-    let mut viewed = state.viewed.lock().unwrap();
+    let mut viewed = lock(&state.viewed);
     if viewed_flag {
         viewed.insert(file_path);
     } else {
@@ -514,7 +530,7 @@ async fn api_comments_get(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    let comments = state.store.lock().unwrap().get_all();
+    let comments = lock(&state.store).get_all();
     // Drafts are opt-in: only the browser UI passes includeDrafts=true.
     // Everyone else gets the agent-visible view, matching the broadcast
     // suppression — `krit comments` must not leak unposted drafts.
@@ -577,7 +593,7 @@ async fn api_comments_post(
         end_column: char_anchor.as_ref().map(|(_, e, _)| *e),
         selected_text: char_anchor.map(|(_, _, t)| t),
     };
-    let created = state.store.lock().unwrap().add(comment);
+    let created = lock(&state.store).add(comment);
     // Drafts stay invisible to the agent until posted.
     if created.status != "draft" {
         state.hub.broadcast(Event::CommentAdded {
@@ -592,7 +608,7 @@ async fn api_comments_post(
 /// /api/submit (Done reviewing must not strand drafts).
 fn post_drafts_and_broadcast(state: &AppState) -> usize {
     let posted: Vec<ReviewComment> = {
-        let mut store = state.store.lock().unwrap();
+        let mut store = lock(&state.store);
         let drafts: Vec<String> = store
             .get_all()
             .into_iter()
@@ -631,7 +647,7 @@ async fn api_comment_put(
 ) -> Response {
     let new_status = payload["status"].as_str().map(|s| s.to_string());
     let (was_draft, updated) = {
-        let mut store = state.store.lock().unwrap();
+        let mut store = lock(&state.store);
         // Only meaningful when a status change was requested (matching v1's
         // wasDraft computation): None = no status in the payload.
         let was_draft: Option<bool> = new_status
@@ -668,7 +684,7 @@ async fn api_comment_delete(
     State(state): State<AppState>,
     AxumPath(id): AxumPath<String>,
 ) -> Response {
-    let removed = state.store.lock().unwrap().remove(&id);
+    let removed = lock(&state.store).remove(&id);
     if !removed {
         return (
             StatusCode::NOT_FOUND,
@@ -696,7 +712,7 @@ async fn api_reply_post(
         author: Some(if source_ui { "user" } else { "agent" }.to_string()),
     };
     let updated = {
-        let mut store = state.store.lock().unwrap();
+        let mut store = lock(&state.store);
         let mut updated = store.add_reply(&id, reply.clone());
         if source_ui {
             // A human reply on a resolved comment reopens it for the next
@@ -742,6 +758,9 @@ async fn api_submit_post(State(state): State<AppState>) -> Response {
     axum::Json(json!({"ok": true, "timestamp": ts})).into_response()
 }
 
+/// v1 contract quirk: GET on /api/submit is the subscriber-presence probe the
+/// UI polls (it gates the Done-reviewing button) — not a dry-run of POST.
+/// Kept on this route for wire compatibility.
 async fn api_submit_get(State(state): State<AppState>) -> Response {
     let (watcher_count, ui_count, agent_count) = state.hub.counts();
     axum::Json(json!({
@@ -815,8 +834,9 @@ fn agent_visible(event: &Event) -> bool {
         Event::FileWritten { path: None } => false, // agent's own refresh
         Event::CommentUpdated { .. } => false,
         // file-written{path} = krit editor save; user-edit = direct
-        // delete/undo. Both provably human — they only flow through UI
-        // endpoints.
+        // delete/undo. Human by convention, not proof: only the browser UI
+        // calls those routes today, but they're ordinary HTTP endpoints — an
+        // agent that starts calling them will hear its own edits.
         _ => true,
     }
 }
@@ -955,4 +975,36 @@ pub fn build_router(state: AppState) -> Router {
         .fallback(serve_ui)
         .layer(axum::middleware::from_fn(log_requests))
         .with_state(state)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PATCH: &str = "diff --git a/src/a.rs b/src/a.rs\nindex 111..222 100644\n--- a/src/a.rs\n+++ b/src/a.rs\n@@ -1 +1 @@\n-old\n+new\ndiff --git a/img.png b/img.png\nnew file mode 100644\nBinary files /dev/null and b/img.png differ\ndiff --git a/b.txt b/b.txt\ndeleted file mode 100644\nBinary files a/b.txt and /dev/null differ";
+
+    #[test]
+    fn parses_file_paths_in_order() {
+        assert_eq!(
+            parse_file_paths(PATCH),
+            vec!["src/a.rs", "img.png", "b.txt"]
+        );
+    }
+
+    #[test]
+    fn extracts_one_file_fragment() {
+        let frag = extract_file_patch(PATCH, "src/a.rs");
+        assert!(frag.starts_with("diff --git a/src/a.rs"));
+        assert!(frag.ends_with("+new"));
+        assert!(!frag.contains("img.png"));
+        assert_eq!(extract_file_patch(PATCH, "absent.rs"), "");
+    }
+
+    #[test]
+    fn classifies_binary_files() {
+        let untracked: HashSet<String> = ["img.png".to_string()].into();
+        let bins = parse_binary_files(PATCH, &untracked);
+        assert_eq!(bins.len(), 2);
+        assert_eq!(bins[0], json!({"path": "img.png", "type": "untracked"}));
+        assert_eq!(bins[1], json!({"path": "b.txt", "type": "deleted"}));
+    }
 }

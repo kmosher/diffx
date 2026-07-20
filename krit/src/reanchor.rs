@@ -1,7 +1,9 @@
 //! Comment re-anchoring after a live file change — GitHub semantics: exact
 //! match near the old position first, then normalized fuzzy match, else the
-//! comment is flagged `outdated` and left at its last-known lines. A pure
-//! function over the store, called with the server's store lock held.
+//! comment is flagged `outdated` and left at its last-known lines. The
+//! matching (find_block) is pure; reanchor_file_comments applies the results
+//! to the store (which persists on every update) with the server's store
+//! lock held.
 
 use crate::pathsafe::is_safe_path;
 use crate::store::{CommentStore, UpdateFields};
@@ -65,9 +67,13 @@ pub fn reanchor_file_comments(
     if !is_safe_path(file_path) {
         return Vec::new();
     }
-    // Deleted, unreadable, or binary — no lines to match, everything on the
-    // file falls through to outdated.
-    let content = std::fs::read_to_string(repo_root.join(file_path)).unwrap_or_default();
+    // Deleted or unreadable — no lines to match, everything on the file
+    // falls through to outdated. Lossy decode (matching read_side and the
+    // edit paths): a stray invalid-UTF-8 byte must not blank the whole file
+    // and spuriously outdate every comment on it.
+    let content = std::fs::read(repo_root.join(file_path))
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
     let file_lines: Vec<&str> = if content.is_empty() {
         Vec::new()
     } else {
@@ -125,4 +131,42 @@ pub fn reanchor_file_comments(
         }
     }
     changed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FILE: &[&str] = &[
+        "fn main() {",
+        "    let a = 1;",
+        "    let b = 2;",
+        "    let a = 1;",
+        "}",
+    ];
+
+    #[test]
+    fn exact_match_prefers_window_around_hint() {
+        // "let a = 1;" appears at lines 2 and 4; the hint decides which wins.
+        assert_eq!(find_block(FILE, &["    let a = 1;"], 2, false), Some(2));
+        assert_eq!(find_block(FILE, &["    let a = 1;"], 4, false), Some(2)); // window scan is low-to-high
+        assert_eq!(find_block(FILE, &["    let b = 2;"], 1, false), Some(3));
+    }
+
+    #[test]
+    fn fuzzy_match_normalizes_whitespace() {
+        assert_eq!(find_block(FILE, &["let  b   =  2;"], 3, false), None);
+        assert_eq!(find_block(FILE, &["let  b   =  2;"], 3, true), Some(3));
+    }
+
+    #[test]
+    fn multi_line_blocks_and_misses() {
+        assert_eq!(
+            find_block(FILE, &["    let a = 1;", "    let b = 2;"], 1, false),
+            Some(2)
+        );
+        assert_eq!(find_block(FILE, &["gone"], 1, true), None);
+        assert_eq!(find_block(FILE, &[], 1, false), None);
+        assert_eq!(find_block(&[], &["x"], 1, false), None);
+    }
 }

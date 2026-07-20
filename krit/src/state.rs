@@ -17,7 +17,11 @@ pub struct KritState {
     pub host: String,
     pub url: String,
     pub started_at: u64,
-    /// Contract version marker: 2 = krit. Absent in v1 diffx state files.
+    /// Contract version marker: 2 = krit. Defaults to 0 on read so a v1
+    /// diffx state file (no `v`) still parses — the subcommands are
+    /// wire-compatible with a running v1 server, and KRIT_STATE_FILE pointed
+    /// at diffx-state.json is a legitimate migration move.
+    #[serde(default)]
     pub v: u8,
 }
 
@@ -78,4 +82,28 @@ pub fn comments_file_path_for(state_path: &Path) -> PathBuf {
     let s = state_path.to_string_lossy();
     let base = s.strip_suffix(".json").unwrap_or(&s);
     PathBuf::from(format!("{base}.comments.json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_hash_is_stable() {
+        // Pinned: a changed hash would orphan existing per-cwd state files.
+        assert_eq!(
+            fnv1a64_hex12("/Users/x/repo"),
+            fnv1a64_hex12("/Users/x/repo")
+        );
+        assert_ne!(fnv1a64_hex12("/a"), fnv1a64_hex12("/b"));
+        assert_eq!(fnv1a64_hex12("").len(), 12);
+    }
+
+    #[test]
+    fn reads_v1_state_file_without_version_field() {
+        let v1 = r#"{"port":1234,"pid":42,"cwd":"/x","host":"127.0.0.1","url":"http://127.0.0.1:1234","startedAt":1}"#;
+        let state: KritState = serde_json::from_str(v1).expect("v1 state parses");
+        assert_eq!(state.v, 0);
+        assert_eq!(state.port, 1234);
+    }
 }

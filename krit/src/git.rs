@@ -15,12 +15,18 @@ pub const INDEX_REF: &str = "INDEX";
 // (diff.external = difftastic, color.ui = always, etc).
 const DIFF_FLAGS: [&str; 2] = ["--no-ext-diff", "--no-color"];
 
-fn git_stdout(args: &[&str]) -> Option<Vec<u8>> {
-    let out = Command::new("git").args(args).output().ok()?;
-    if !out.status.success() {
-        return None;
+/// Error carries git's own stderr — the diff paths surface it to the client
+/// so a typo'd ref reads as an error, not as an empty "no changes" review.
+fn git_output(args: &[&str]) -> Result<Vec<u8>, String> {
+    match Command::new("git").args(args).output() {
+        Ok(out) if out.status.success() => Ok(out.stdout),
+        Ok(out) => Err(String::from_utf8_lossy(&out.stderr).trim().to_string()),
+        Err(err) => Err(format!("failed to run git: {err}")),
     }
-    Some(out.stdout)
+}
+
+fn git_stdout(args: &[&str]) -> Option<Vec<u8>> {
+    git_output(args).ok()
 }
 
 fn git_string(args: &[&str]) -> Option<String> {
@@ -49,22 +55,24 @@ pub fn branch_name() -> String {
         .unwrap_or_default()
 }
 
-pub fn custom_git_diff(args: &[String]) -> String {
+pub fn custom_git_diff(args: &[String]) -> Result<String, String> {
     let mut cmd_args: Vec<&str> = vec!["diff"];
     cmd_args.extend(DIFF_FLAGS);
     cmd_args.extend(args.iter().map(|s| s.as_str()));
-    git_string(&cmd_args).unwrap_or_default()
+    git_output(&cmd_args).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
-pub fn git_diff(staged: bool, untracked: bool, root: &Path) -> String {
+pub fn git_diff(staged: bool, untracked: bool, root: &Path) -> Result<String, String> {
     let mut parts: Vec<String> = Vec::new();
 
-    let unstaged = git_string(&["diff", DIFF_FLAGS[0], DIFF_FLAGS[1]]).unwrap_or_default();
+    let unstaged = git_output(&["diff", DIFF_FLAGS[0], DIFF_FLAGS[1]])
+        .map(|b| String::from_utf8_lossy(&b).into_owned())?;
     if !unstaged.is_empty() {
         parts.push(unstaged);
     }
     if staged {
-        let s = git_string(&["diff", DIFF_FLAGS[0], DIFF_FLAGS[1], "--staged"]).unwrap_or_default();
+        let s = git_output(&["diff", DIFF_FLAGS[0], DIFF_FLAGS[1], "--staged"])
+            .map(|b| String::from_utf8_lossy(&b).into_owned())?;
         if !s.is_empty() {
             parts.push(s);
         }
@@ -75,24 +83,32 @@ pub fn git_diff(staged: bool, untracked: bool, root: &Path) -> String {
             parts.push(u);
         }
     }
-    parts.join("\n")
+    Ok(parts.join("\n"))
 }
 
-pub fn untracked_file_paths() -> Vec<String> {
-    git_string(&["ls-files", "--others", "--exclude-standard"])
-        .map(|out| {
-            let trimmed = out.trim();
-            if trimmed.is_empty() {
-                Vec::new()
-            } else {
-                trimmed.lines().map(|l| l.to_string()).collect()
-            }
-        })
-        .unwrap_or_default()
+pub fn untracked_file_paths(root: &Path) -> Vec<String> {
+    // Run from the repo root so paths come back root-relative regardless of
+    // the server's launch cwd — from a subdir, cwd-relative output silently
+    // dropped or mis-pathed untracked files (a bug v1 shared).
+    let Ok(out) = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(root)
+        .output()
+    else {
+        return Vec::new();
+    };
+    if !out.status.success() {
+        return Vec::new();
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .lines()
+        .map(|l| l.to_string())
+        .collect()
 }
 
 /// NUL byte in the first 8KB — git's own text/binary heuristic.
-fn looks_binary(bytes: &[u8]) -> bool {
+pub fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|&b| b == 0)
 }
 
@@ -100,18 +116,21 @@ fn looks_binary(bytes: &[u8]) -> bool {
 // they render like any other addition. Shape (headers, sentinel index line,
 // the leading '\n') matches v1 byte-for-byte — the UI parses this.
 fn untracked_files_diff(root: &Path) -> String {
-    let files = untracked_file_paths();
+    let files = untracked_file_paths(root);
     if files.is_empty() {
         return String::new();
     }
     let mut patches: Vec<String> = Vec::new();
     for file in files {
         let abs = root.join(&file);
-        let bytes = match std::fs::read(&abs) {
-            Ok(b) => b,
-            Err(_) => continue, // skip unreadable files
+        // An unreadable file renders as the binary placeholder (matching v1,
+        // whose isBinaryFile reported true on read error) — it must not
+        // vanish from the patch while still listed in untrackedFiles.
+        let (bytes, unreadable) = match std::fs::read(&abs) {
+            Ok(b) => (b, false),
+            Err(_) => (Vec::new(), true),
         };
-        if looks_binary(&bytes) {
+        if unreadable || looks_binary(&bytes) {
             patches.push(format!(
                 "diff --git a/{file} b/{file}\nnew file mode 100644\nindex 0000000..0000001\nBinary files /dev/null and b/{file} differ"
             ));
@@ -137,9 +156,9 @@ fn untracked_files_diff(root: &Path) -> String {
     }
 }
 
-/// File contents at a ref/sentinel, for hunk-context expansion. 50MB cap via
-/// the read itself being bounded by practical repo contents (git enforces
-/// nothing here; v1's maxBuffer existed for Node's exec plumbing).
+/// File contents at a ref/sentinel, for hunk-context expansion. No size cap
+/// here — v1's 50MB maxBuffer was Node exec plumbing, not policy; the 5MB
+/// text cap that protects the /api/diff payload lives in server.rs.
 pub fn file_content_at_ref(root: &Path, file_path: &str, git_ref: &str) -> Option<Vec<u8>> {
     if !is_safe_path(file_path) {
         return None;
@@ -223,5 +242,56 @@ pub fn resolve_diff_refs(custom_args: Option<&[String]>) -> (String, String) {
         // 2+ positionals: first two are the refs (git's own behavior; extras
         // would be pathspecs).
         _ => (positionals[0].to_string(), positionals[1].to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn refs(args: &[&str]) -> (String, String) {
+        let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        resolve_diff_refs(Some(&owned))
+    }
+
+    // Pins the arg-shape → refs table (minus the `...` merge-base row, which
+    // shells out). Matches v1's git.ts table.
+    #[test]
+    fn resolve_refs_table() {
+        assert_eq!(
+            resolve_diff_refs(None),
+            ("HEAD".into(), WORKING_TREE_REF.into())
+        );
+        assert_eq!(refs(&[]), ("HEAD".into(), WORKING_TREE_REF.into()));
+        assert_eq!(refs(&["--staged"]), ("HEAD".into(), INDEX_REF.into()));
+        assert_eq!(refs(&["--cached"]), ("HEAD".into(), INDEX_REF.into()));
+        assert_eq!(
+            refs(&["HEAD~3"]),
+            ("HEAD~3".into(), WORKING_TREE_REF.into())
+        );
+        assert_eq!(refs(&["main..feature"]), ("main".into(), "feature".into()));
+        assert_eq!(refs(&["main.."]), ("main".into(), "HEAD".into()));
+        assert_eq!(refs(&["a", "b"]), ("a".into(), "b".into()));
+        assert_eq!(refs(&["a", "b", "path/spec"]), ("a".into(), "b".into()));
+        // Flags are skipped; everything after `--` is pathspec, not refs.
+        assert_eq!(
+            refs(&["-M", "HEAD~1"]),
+            ("HEAD~1".into(), WORKING_TREE_REF.into())
+        );
+        assert_eq!(
+            refs(&["--", "src/"]),
+            ("HEAD".into(), WORKING_TREE_REF.into())
+        );
+        assert_eq!(
+            refs(&["HEAD~2", "--", "src/"]),
+            ("HEAD~2".into(), WORKING_TREE_REF.into())
+        );
+    }
+
+    #[test]
+    fn binary_heuristic() {
+        assert!(!looks_binary(b"plain text\n"));
+        assert!(looks_binary(b"has\0nul"));
+        assert!(!looks_binary(&[]));
     }
 }

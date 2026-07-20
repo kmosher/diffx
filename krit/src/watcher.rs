@@ -18,13 +18,15 @@ const DEBOUNCE_MS: u64 = 200;
 
 /// Fast-path component filter, checked before the git-aware one: .git is
 /// never gitignored (so check-ignore wouldn't catch it), and the other names
-/// are hot enough (installs, builds, sibling worktrees) that skipping the
-/// subprocess matters when they churn.
+/// are hot enough (installs, sibling worktrees) that skipping the subprocess
+/// matters when they churn. Matches v1's filter exactly — nothing here that a
+/// repo could plausibly track (Cargo's target/ is left to check-ignore, since
+/// `target` is a legitimate tracked-dir name outside Rust).
 fn is_ignored(rel: &Path) -> bool {
     rel.components().any(|c| {
         matches!(
             c.as_os_str().to_str(),
-            Some(".git") | Some("node_modules") | Some(".claude") | Some("target")
+            Some(".git") | Some("node_modules") | Some(".claude")
         )
     })
 }

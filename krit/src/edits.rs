@@ -14,6 +14,33 @@ pub struct DeleteRange {
     pub end_column: u32,
 }
 
+/// Byte offset for a JS UTF-16 code-unit column into `line`. Columns arrive
+/// from the browser, whose string indexing (and v1's String.slice) counts
+/// UTF-16 units — byte-slicing with them panics or corrupts on any non-ASCII
+/// text before the position. None when the column is past the end or splits
+/// a surrogate pair; callers treat that as "range no longer matches".
+fn utf16_col_to_byte(line: &str, col: usize) -> Option<usize> {
+    let mut units = 0;
+    for (byte_idx, ch) in line.char_indices() {
+        if units == col {
+            return Some(byte_idx);
+        }
+        units += ch.len_utf16();
+        if units > col {
+            return None;
+        }
+    }
+    (units == col).then_some(line.len())
+}
+
+/// Read as lossy UTF-8, matching what the server serves the browser — offsets
+/// computed against the lossily-decoded text must splice the same text.
+fn read_lossy(path: &Path) -> Option<String> {
+    std::fs::read(path)
+        .ok()
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+}
+
 /// Removes the range and writes the file back. Returns the deleted text (for
 /// the undo buffer / user-edit event), or None if the path is unsafe, the
 /// file is unreadable, or the range no longer fits the file on disk — the
@@ -23,7 +50,7 @@ pub fn splice_delete_range(repo_root: &Path, range: &DeleteRange) -> Option<Stri
     if !is_safe_path(&range.file_path) {
         return None;
     }
-    let content = std::fs::read_to_string(repo_root.join(&range.file_path)).ok()?;
+    let content = read_lossy(&repo_root.join(&range.file_path))?;
     let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
 
     let start_idx = range.start_line.checked_sub(1)? as usize;
@@ -33,10 +60,8 @@ pub fn splice_delete_range(repo_root: &Path, range: &DeleteRange) -> Option<Stri
     }
     let first_line = lines[start_idx].clone();
     let last_line = lines[end_idx].clone();
-    let (sc, ec) = (range.start_column as usize, range.end_column as usize);
-    if sc > first_line.len() || ec > last_line.len() {
-        return None;
-    }
+    let sc = utf16_col_to_byte(&first_line, range.start_column as usize)?;
+    let ec = utf16_col_to_byte(&last_line, range.end_column as usize)?;
     if start_idx == end_idx && sc > ec {
         return None;
     }
@@ -76,7 +101,7 @@ pub fn splice_insert_text(
     if !is_safe_path(file_path) {
         return false;
     }
-    let Ok(content) = std::fs::read_to_string(repo_root.join(file_path)) else {
+    let Some(content) = read_lossy(&repo_root.join(file_path)) else {
         return false;
     };
     let mut lines: Vec<String> = content.split('\n').map(|s| s.to_string()).collect();
@@ -87,10 +112,9 @@ pub fn splice_insert_text(
         return false;
     }
     let line = lines[idx].clone();
-    let col = start_column as usize;
-    if col > line.len() {
+    let Some(col) = utf16_col_to_byte(&line, start_column as usize) else {
         return false;
-    }
+    };
 
     let inserted: Vec<&str> = text.split('\n').collect();
     if inserted.len() == 1 {
@@ -103,4 +127,80 @@ pub fn splice_insert_text(
         lines.splice(idx..=idx, new_lines);
     }
     write_working_tree_file(repo_root, file_path, &lines.join("\n"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_cols_match_ascii_bytes() {
+        assert_eq!(utf16_col_to_byte("hello", 0), Some(0));
+        assert_eq!(utf16_col_to_byte("hello", 3), Some(3));
+        assert_eq!(utf16_col_to_byte("hello", 5), Some(5));
+        assert_eq!(utf16_col_to_byte("hello", 6), None);
+        assert_eq!(utf16_col_to_byte("", 0), Some(0));
+    }
+
+    #[test]
+    fn utf16_cols_diverge_from_bytes_on_multibyte() {
+        // "café-menu": é is 1 UTF-16 unit but 2 UTF-8 bytes.
+        let line = "café-menu";
+        assert_eq!(utf16_col_to_byte(line, 4), Some(5)); // the '-' after é
+        assert_eq!(&line[utf16_col_to_byte(line, 4).unwrap()..], "-menu");
+        // 💚 is 2 UTF-16 units (surrogate pair), 4 UTF-8 bytes.
+        let emoji = "a💚b";
+        assert_eq!(utf16_col_to_byte(emoji, 1), Some(1));
+        assert_eq!(utf16_col_to_byte(emoji, 3), Some(5));
+        assert_eq!(utf16_col_to_byte(emoji, 2), None); // splits the pair
+        assert_eq!(utf16_col_to_byte(emoji, 4), Some(6));
+    }
+
+    fn temp_repo(name: &str, contents: &str) -> (std::path::PathBuf, String) {
+        let dir = std::env::temp_dir().join(format!("krit-edits-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(name), contents).unwrap();
+        (dir, name.to_string())
+    }
+
+    #[test]
+    fn delete_range_with_non_ascii_prefix() {
+        // Regression: UTF-16 columns from the browser used to be treated as
+        // byte offsets, panicking or corrupting on lines like this one.
+        let (root, file) = temp_repo("non-ascii.txt", "let s = \"café-menu\";\nnext");
+        // Delete `menu` — UTF-16 cols 14..18 on line 1.
+        let deleted = splice_delete_range(
+            &root,
+            &DeleteRange {
+                file_path: file.clone(),
+                start_line: 1,
+                start_column: 14,
+                end_line: 1,
+                end_column: 18,
+            },
+        );
+        assert_eq!(deleted.as_deref(), Some("menu"));
+        let after = std::fs::read_to_string(root.join(&file)).unwrap();
+        assert_eq!(after, "let s = \"café-\";\nnext");
+        // Undo restores byte-exactly.
+        assert!(splice_insert_text(&root, &file, 1, 14, "menu"));
+        let restored = std::fs::read_to_string(root.join(&file)).unwrap();
+        assert_eq!(restored, "let s = \"café-menu\";\nnext");
+    }
+
+    #[test]
+    fn out_of_range_columns_refuse_rather_than_panic() {
+        let (root, file) = temp_repo("short.txt", "ab");
+        let result = splice_delete_range(
+            &root,
+            &DeleteRange {
+                file_path: file,
+                start_line: 1,
+                start_column: 1,
+                end_line: 1,
+                end_column: 99,
+            },
+        );
+        assert!(result.is_none());
+    }
 }

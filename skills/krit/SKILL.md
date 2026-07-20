@@ -1,7 +1,6 @@
 ---
 name: krit
 description: "End-to-end code review with krit (the Rust diffx v2): launch the UI, stream the user's inline comments as they're written, reply/resolve in real time, finish when the user clicks Done reviewing. Use when the user invokes /krit or asks to review changes with krit. For /diffx (the v1 fallback), use the diffx skill instead."
-user_invocable: true
 ---
 
 # Krit-driven code review
@@ -59,12 +58,12 @@ krit state    # prints JSON incl. "url": "http://127.0.0.1:<port>"
 
 Monitor with `ws: {url: "ws://localhost:<port>/api/events-ws"}` (use `localhost`, not `127.0.0.1` — sandbox host allowlists accept only the name). Each incoming text frame is one JSON event.
 
-The agent stream is **human-only**: the server filters out echoes of your own work (`file-changed` from the fs-watcher, your own `krit refresh`, comment status changes you make). Frames you will see:
+The agent stream is **human-only**: the server filters out echoes of your own work (`file-changed` from the fs-watcher, your own `krit refresh`, `comment-updated` re-anchor fallout). Because `comment-updated` is filtered, comment line positions in your context can go stale after files change — run `krit comments` to get current positions before acting on a comment you received a while ago. Frames you will see:
 
 ```json
 {"type":"comment-added","comment":{"id":"...","filePath":"...","lineNumber":42,"endLine":42,"body":"...", ...}}
 {"type":"reply-added","commentId":"...","reply":{"id":"...","body":"...","author":"user","createdAt":...},"commentStatus":"open"}
-{"type":"user-edit","path":"...","range":{...}}
+{"type":"user-edit","action":"delete","filePath":"...","range":{"startLine":10,"startColumn":0,"endLine":10,"endColumn":4},"deletedText":"..."}
 {"type":"file-written","path":"..."}
 {"type":"clients","browsers":2}
 {"type":"submitted","timestamp":...}
@@ -124,7 +123,7 @@ The krit server shuts itself down 60s after the last UI subscriber disconnects (
 ## Other subcommands
 
 ```bash
-krit comments [open|resolved|replied]   # dump comments as JSON
+krit comments [open|resolved|replied|all]   # dump comments as JSON (no arg = all)
 krit reopen <id>                        # flip a resolved comment back to open
 krit wait-for-submit                    # batch alternative: block until Done reviewing (exit 0) or disconnect (exit 2)
 ```

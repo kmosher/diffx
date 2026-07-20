@@ -133,3 +133,116 @@ pub fn now_millis() -> u64 {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
 }
+
+// Snapshot tests pinning every Event variant's JSON against the frozen v1
+// wire strings — tag casing, field names, and optional-field absence are the
+// contract; a green build with a changed shape here means a broken UI/skill.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn js(event: &Event) -> String {
+        serde_json::to_string(event).unwrap()
+    }
+
+    #[test]
+    fn event_wire_shapes() {
+        assert_eq!(
+            js(&Event::State {
+                watcher_count: 1,
+                ui_count: 2,
+                agent_count: 3
+            }),
+            r#"{"type":"state","watcherCount":1,"uiCount":2,"agentCount":3}"#
+        );
+        assert_eq!(
+            js(&Event::Clients { browsers: 2 }),
+            r#"{"type":"clients","browsers":2}"#
+        );
+        assert_eq!(
+            js(&Event::FileChanged {
+                path: "a.rs".into()
+            }),
+            r#"{"type":"file-changed","path":"a.rs"}"#
+        );
+        assert_eq!(
+            js(&Event::FileWritten { path: None }),
+            r#"{"type":"file-written","path":null}"#
+        );
+        assert_eq!(
+            js(&Event::FileWritten {
+                path: Some("a.rs".into())
+            }),
+            r#"{"type":"file-written","path":"a.rs"}"#
+        );
+        assert_eq!(
+            js(&Event::Submitted { timestamp: 7 }),
+            r#"{"type":"submitted","timestamp":7}"#
+        );
+        assert_eq!(
+            js(&Event::ReviewEnded {
+                reason: "idle".into()
+            }),
+            r#"{"type":"review-ended","reason":"idle"}"#
+        );
+        assert_eq!(
+            js(&Event::UserEdit {
+                action: "delete".into(),
+                file_path: "a.rs".into(),
+                range: Some(EditRange {
+                    start_line: 1,
+                    start_column: 0,
+                    end_line: 1,
+                    end_column: 4
+                }),
+                deleted_text: Some("text".into()),
+                inserted_text: None,
+            }),
+            r#"{"type":"user-edit","action":"delete","filePath":"a.rs","range":{"startLine":1,"startColumn":0,"endLine":1,"endColumn":4},"deletedText":"text"}"#
+        );
+    }
+
+    #[test]
+    fn comment_wire_shape_and_optional_absence() {
+        let bare = ReviewComment {
+            id: "i".into(),
+            file_path: "f".into(),
+            side: "additions".into(),
+            line_number: 3,
+            end_line: None,
+            line_content: "x".into(),
+            body: "b".into(),
+            status: "open".into(),
+            created_at: 1,
+            replies: Vec::new(),
+            outdated: None,
+            suggestion: None,
+            start_column: None,
+            end_column: None,
+            selected_text: None,
+        };
+        // Optional fields must be ABSENT (not null) when unset — the UI
+        // distinguishes missing from null.
+        assert_eq!(
+            serde_json::to_string(&bare).unwrap(),
+            r#"{"id":"i","filePath":"f","side":"additions","lineNumber":3,"lineContent":"x","body":"b","status":"open","createdAt":1,"replies":[]}"#
+        );
+        let event = Event::CommentAdded { comment: bare };
+        assert!(js(&event).starts_with(r#"{"type":"comment-added","comment":{"#));
+
+        let reply = CommentReply {
+            id: "r".into(),
+            body: "y".into(),
+            created_at: 2,
+            author: Some("user".into()),
+        };
+        assert_eq!(
+            js(&Event::ReplyAdded {
+                comment_id: "i".into(),
+                reply,
+                comment_status: "open".into()
+            }),
+            r#"{"type":"reply-added","commentId":"i","reply":{"id":"r","body":"y","createdAt":2,"author":"user"},"commentStatus":"open"}"#
+        );
+    }
+}
