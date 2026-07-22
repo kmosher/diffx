@@ -1031,17 +1031,23 @@ body {
     background: var(--surface-2, #f6f8fa);
 }
 
+/* Sizing: grows with its content by default (the editor's intrinsic height
+   is the wrapper's auto height), and the resize handle lets the user drag a
+   fixed height instead — once an inline height is set, .cm-editor's 100%
+   fills it and CodeMirror scrolls internally. */
 .comment-suggestion-cm {
     border: 1px solid var(--border);
     border-radius: 6px;
-    overflow: hidden;
+    overflow: auto;
+    resize: vertical;
+    max-height: 60vh;
     background: var(--surface-2, #f6f8fa);
 }
 .comment-suggestion-cm .cm-editor {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;
     min-height: 80px;
-    max-height: 320px;
+    height: 100%;
 }
 .comment-suggestion-cm .cm-editor.cm-focused {
     outline: none;

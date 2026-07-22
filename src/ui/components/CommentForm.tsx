@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror'
 import { Prec } from '@codemirror/state'
-import { keymap } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
 import { pierreSyntaxHighlighting } from './pierreHighlightStyle'
 import { useLanguageExtension } from '../hooks/useLanguageExtension'
 
@@ -210,6 +210,9 @@ export function CommentForm({
         ]),
       ),
       pierreSyntaxHighlighting(scheme),
+      // Long lines wrap (matching the diff surface) instead of forcing a
+      // horizontal scroll inside a little box.
+      EditorView.lineWrapping,
       ...langExt,
     ],
     [langExt, scheme],
