@@ -110,6 +110,12 @@ impl Hub {
         )
     }
 
+    /// Whether any UI client has ever connected — the launch-verification
+    /// signal (a current count would miss connect-then-disconnect).
+    pub fn had_browser(&self) -> bool {
+        self.ever_had_browser.load(Ordering::SeqCst)
+    }
+
     pub fn state_event(&self) -> Event {
         let (watcher_count, ui_count, agent_count) = self.counts();
         Event::State {

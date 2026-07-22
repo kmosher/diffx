@@ -234,7 +234,7 @@ async fn serve(
     let local_url = format!("http://{host}:{actual_port}");
 
     println!("krit server running at {local_url}");
-    write_state(
+    let write_result = write_state(
         &KritState {
             port: actual_port,
             pid: std::process::id(),
@@ -248,7 +248,21 @@ async fn serve(
         },
         &state_path,
     );
-    println!("state file: {}", state_path.display());
+    match write_result {
+        Ok(()) => println!("state file: {}", state_path.display()),
+        Err(err) => {
+            eprintln!(
+                "WARNING: could not write the state file at {}: {err}",
+                state_path.display()
+            );
+            eprintln!(
+                "Subcommands (`krit state`, `krit comments`, ...) will not find this server."
+            );
+            eprintln!(
+                "If this shell is sandboxed, allow writes to that directory or point KRIT_STATE_FILE at one that is writable."
+            );
+        }
+    }
 
     // Every exit path says why it's exiting and cleans the state file —
     // v1's silent-SIGTERM forensics episode, never again.
@@ -286,6 +300,19 @@ async fn serve(
     };
     if !no_open {
         launch_review_ui(&open_url);
+        // Verify the launch produced a real client. Without this, a dropped
+        // deep link looks like success until the no-browser timer kills the
+        // review three silent minutes later.
+        let hub = hub.clone();
+        let url = open_url.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+            if !hub.had_browser() {
+                println!(
+                    "No UI has connected 10s after launch — if nothing opened, visit {url} in a browser."
+                );
+            }
+        });
     } else {
         print_manual_url_hint(&local_url);
     }
@@ -352,8 +379,11 @@ fn launch_review_ui(url: &str) {
             deep_link.push_str(&format!("&title={}", urlencode(&title)));
         }
         match open::that(&deep_link) {
+            // Ok only means the OS accepted the URL — the app may not be
+            // running or may drop the deep link. Don't claim it opened; the
+            // connect check in serve() reports whether a UI actually arrived.
             Ok(()) => {
-                println!("Opened the diffx app. It's now waiting for you to leave inline comments.")
+                println!("Asked the diffx app to open this review.")
             }
             Err(err) => eprintln!(
                 "Could not reach the diffx app ({err}); is it installed? Falling back to the URL."

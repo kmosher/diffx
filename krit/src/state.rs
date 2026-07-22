@@ -52,13 +52,15 @@ pub fn default_state_path() -> PathBuf {
         .join(format!("state-{}.json", fnv1a64_hex12(&cwd)))
 }
 
-pub fn write_state(state: &KritState, path: &Path) {
+/// A failed write must reach the caller: without the state file every
+/// subcommand is blind to this server, and a swallowed sandbox EPERM here
+/// once cost half an hour of "no running krit server" forensics.
+pub fn write_state(state: &KritState, path: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
+        std::fs::create_dir_all(dir)?;
     }
-    if let Ok(json) = serde_json::to_string_pretty(state) {
-        let _ = std::fs::write(path, json);
-    }
+    let json = serde_json::to_string_pretty(state).expect("state struct always serializes");
+    std::fs::write(path, json)
 }
 
 pub fn read_state(path: &Path) -> Option<KritState> {

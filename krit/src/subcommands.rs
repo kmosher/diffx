@@ -2,7 +2,7 @@
 //! file. Blocking on purpose — these run and exit before the async runtime
 //! ever starts.
 
-use crate::state::{KritState, default_state_path, read_state};
+use crate::state::{KritState, default_state_path};
 use serde_json::{Value, json};
 use std::io::Read;
 
@@ -16,12 +16,37 @@ pub const SUBCOMMANDS: [&str; 7] = [
     "refresh",
 ];
 
+// Missing file, unreadable file, and unparseable file are three different
+// diagnoses (server never started / wrong KRIT_STATE_FILE vs permissions vs
+// a stale-or-hand-written file) — collapsing them into one generic error
+// turned each into a support thread. Always name the path checked.
 fn require_state() -> KritState {
-    match read_state(&default_state_path()) {
-        Some(s) => s,
-        None => {
-            eprintln!("Error: no running krit server found for this session.");
+    let path = default_state_path();
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            eprintln!(
+                "Error: no state file at {} — no running krit server found for this session.",
+                path.display()
+            );
             eprintln!("Start one with `krit` first, or set KRIT_STATE_FILE to a state-file path.");
+            std::process::exit(1);
+        }
+        Err(err) => {
+            eprintln!("Error: cannot read state file {}: {err}", path.display());
+            std::process::exit(1);
+        }
+    };
+    match serde_json::from_str(&content) {
+        Ok(s) => s,
+        Err(err) => {
+            eprintln!(
+                "Error: state file {} is not a valid krit state: {err}",
+                path.display()
+            );
+            eprintln!(
+                "Expected fields: port, pid, cwd, host, url, startedAt. Is it stale or hand-written?"
+            );
             std::process::exit(1);
         }
     }
