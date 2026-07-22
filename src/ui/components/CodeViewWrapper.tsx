@@ -868,6 +868,10 @@ export const CodeViewWrapper = memo(
     const options: CodeViewOptions<Metadata> = useMemo(
       () => ({
         diffStyle,
+        // Wrap long lines instead of clipping them — the surface has
+        // overflow-x: clip (global.css), so anything past the viewport edge
+        // was simply unreadable.
+        overflow: 'wrap' as const,
         themeType: 'system' as const,
         theme: { dark: 'github-dark' as const, light: 'github-light' as const },
         enableGutterUtility: true,
