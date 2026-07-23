@@ -72,7 +72,8 @@ Vertical slices, each leaving a runnable demo — never an 80%-done valley:
 5. **Polish**: drafts, char-anchored comments, suggest-edit apply — contract
    parity checklist against v1.
 
-**Status: all five slices are live-verified.** Beyond the skeleton, krit also
+**Status: landed on `main` (2026-07-22) — krit is the primary tool; the v1
+Node CLI stays installed as fallback. All five slices are live-verified.** Beyond the skeleton, krit also
 carries: a `.gitignore`-aware watcher (`git check-ignore` per changed path),
 a human-only agent event stream (agents don't hear their own edits), the
 `launcher: "app"` deep-link path (reuses the `diffx://` scheme the desktop

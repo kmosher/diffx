@@ -6,6 +6,21 @@ A local code review tool designed for the coding-agent workflow. Review AI-gener
 
 ## Install
 
+Two implementations share this repo and the same UI, review flow, and CLI
+contract:
+
+**krit** — the Rust server (v2, primary):
+
+```bash
+cargo install --path krit
+```
+
+The build embeds the web UI and rebuilds it automatically when UI sources
+change (requires `pnpm`; set `KRIT_SKIP_UI_BUILD=1` to embed `dist/client`
+as-is). All commands below work the same with `krit` in place of `diffx`.
+
+**diffx** — the Node CLI (v1, kept as fallback):
+
 ```bash
 npm install -g diffx-cli
 ```
