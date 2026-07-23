@@ -1,188 +1,113 @@
-# diffx
+# krit
 
-A local code review tool designed for the coding-agent workflow. Review AI-generated changes in a GitHub PR-like web UI, leave inline comments, then hand them back to your coding agent to fix — or have the agent watch your comments and respond as you write them.
+A local code review tool designed for the coding-agent workflow. Review AI-generated changes in a GitHub-PR-like web UI, leave inline comments, and have your agent respond to them live as you write them — reply, resolve, and rewrite without leaving the review.
 
-![screenshot](https://raw.githubusercontent.com/wong2/diffx/main/screenshot.png)
+krit is a single static Rust binary with the web UI embedded. It began life as a fork of [wong2/diffx](https://www.npmjs.com/package/diffx-cli) and preserves that API contract; the original Node implementation ships from this repo as `diffx-cli` (see [The v1 fallback](#the-v1-fallback)).
+
+![screenshot](screenshot.png)
 
 ## Install
 
-Two implementations share this repo and the same UI, review flow, and CLI
-contract:
-
-**krit** — the Rust server (v2, primary):
-
 ```bash
-cargo install --path krit
+cargo install --git https://github.com/kmosher/krit krit
+# or from a checkout:
+just install
 ```
 
-The build embeds the web UI and rebuilds it automatically when UI sources
-change (requires `pnpm`; set `KRIT_SKIP_UI_BUILD=1` to embed `dist/client`
-as-is). All commands below work the same with `krit` in place of `diffx`.
-
-**diffx** — the Node CLI (v1, kept as fallback):
-
-```bash
-npm install -g diffx-cli
-```
+The build embeds the web UI and rebuilds it automatically when UI sources change (requires `pnpm`; set `KRIT_SKIP_UI_BUILD=1` to embed `dist/client` as-is).
 
 ## Usage
 
 Run in any git repository:
 
 ```bash
-diffx
+krit
 ```
 
-This starts a local server on a random available port and opens your browser with a diff review UI. The server stays up waiting for you to leave inline comments; when you're done, click **Done reviewing** in the toolbar (or kill the server with Ctrl+C).
+This starts a local server on a random available port and opens the review UI (the desktop app if installed, otherwise your browser). The server waits for inline comments; click **Done reviewing** when finished (Ctrl+C to abort).
 
 ### Options
 
 ```
-diffx [options] [-- <git-diff-args>]
+krit [options] [-- <git-diff-args>]
 
 Options:
   -p, --port <port>   Server port (default: random available)
   --host <host>       Bind address (default: 127.0.0.1; pass 0.0.0.0 for LAN)
-  --no-open           Don't auto-open the browser
+  --no-open           Don't auto-open the UI
   -v, --version       Show version
   -h, --help          Show help
 
 Examples:
-  diffx                          # Review working tree changes
-  diffx -- --staged              # Only staged changes
-  diffx -- HEAD~3                # Diff against 3 commits ago
-  diffx -- main..HEAD            # Diff between branches
-  diffx --host 0.0.0.0           # Allow other machines on the LAN to review
+  krit                           # Review working tree changes
+  krit -- --staged               # Only staged changes
+  krit -- HEAD~3                 # Diff against 3 commits ago
+  krit -- main..HEAD             # Diff between branches
+  krit --host 0.0.0.0            # Allow other machines on the LAN to review
 ```
 
 ### Session subcommands
 
-While a `diffx` server is running, the same binary works as a client for it (auto-discovered via a state file at `$CLAUDE_TMPDIR/diffx-state.json` or `~/.diffx/state-<sha1(cwd)>.json`):
+While a `krit` server is running, the same binary works as a client for it, auto-discovered via a state file (`$KRIT_STATE_FILE`, else `$CLAUDE_TMPDIR/krit-state.json`, else `~/.krit/state-<hash(cwd)>.json`):
 
 ```
-diffx state                       # Print state JSON (port, pid, url, etc.)
-diffx comments [open|resolved|replied|all]
-                                  # List comments, optionally filtered
-diffx reply <id> <text...>        # Reply to a comment (tagged author: 'agent')
-diffx resolve <id>                # Mark a comment resolved
-diffx reopen <id>                 # Reopen a resolved comment
-                                  # lines on stdout (exits 0 when the user clicks
-                                  # Done reviewing, 2 on disconnect, 130 on Ctrl+C)
-diffx wait-for-submit             # Block until the user clicks Done reviewing
+krit state                        # Print state JSON (port, pid, url, etc.)
+krit comments [open|resolved|replied|all]
+krit reply <id> <text...>         # Reply to a comment (tagged author: 'agent')
+krit resolve <id>                 # Mark a comment resolved
+krit reopen <id>                  # Reopen a resolved comment
+krit refresh                      # Re-diff and push updates to the UI
+krit wait-for-submit              # Block until the user clicks Done reviewing
 ```
 
-The WebSocket endpoint `ws://<host>:<port>/api/events-ws` is the integration point for an agent that wants to respond to comments as the user writes them — each new comment or user reply arrives as one JSON frame; the agent's own `diffx reply` calls don't echo back, so there's no self-feedback loop.
+The WebSocket endpoint `ws://<host>:<port>/api/events-ws` is the integration point for an agent responding to comments live — each new comment or user reply arrives as one JSON frame. The stream carries only human-originated events (the agent's own replies and file edits don't echo back), so there's no self-feedback loop.
 
 ## Features
 
 - **Split / Unified view** — Toggle between side-by-side and inline diff
 - **Syntax highlighting** — Powered by Shiki with GitHub themes; respects `.editorconfig` for per-file tab size
 - **File tree** — Hierarchical browser with search filter, collapsible sidebar, and file change-type icons
-- **Inline comments** — Click the `+` button on any line, or **drag the gutter** across multiple lines to comment on a range
-- **Conversation threads** — Reply to any comment from the browser. Agents reply via the `diffx reply` subcommand or the API; agent replies render with a bot avatar in violet, user replies in blue. Replying to a resolved comment auto-reopens it.
-- **Expandable context** — Once both file versions have loaded, you can expand unedited lines above, below, and between hunks. Contents are fetched lazily as each file scrolls into view; files over 5 MB require an explicit "Load anyway" opt-in.
-- **Comment status tracker** — Sidebar widget showing open / replied / resolved counts with click-to-navigate links
-- **Done reviewing** — Submit pulse fires when you're finished; connected event subscribers see it and wind down cleanly
-- **Copy comments** — One-click copy all comments as structured XML for an offline agent
+- **Inline comments** — Click the `+` on any line, or **drag the gutter** across a range; select text for character-anchored comments
+- **Suggested edits** — Rewrite the selected code inline; the agent (or the UI) can apply it to the working tree
+- **Conversation threads** — Reply from the browser; agents reply via `krit reply`. Replying to a resolved comment auto-reopens it.
+- **Live refresh** — A filesystem watcher re-diffs as the agent edits; comments re-anchor to their new positions
+- **Expandable context** — Expand unedited lines above, below, and between hunks; lazy-loaded per file
+- **Comment status tracker** — Sidebar widget with draft / open / replied / resolved counts and click-to-navigate
+- **Drafts** — Save comments invisibly to the agent until you post them (or finish the review)
+- **Copy comments** — One-click copy as structured XML for an offline agent
 - **Image preview** — Side-by-side comparison for added, modified, and deleted images
-- **Viewed tracking** — Mark files as reviewed to track progress
-- **Staged / Untracked toggles** — Choose which working-tree changes to include
-- **Custom diff commands** — Pass any `git diff` arguments after `--`; expansion still works for `HEAD~N`, `X..Y`, `X...Y`, two-ref, and `--staged` invocations
-- **Persistent settings** — Diff style, default tab size, browser choice, etc. saved across sessions
-
-## Comment Output Format
-
-When you click "Copy comments", the output is structured XML optimized for an AI agent:
-
-```xml
-<code-review-comments version="2">
-<file path="src/utils/parser.ts">
-<comment line="42">
-<code>+ const parsedToken = tokenize(input)</code>
-Rename `x` to `parsedToken` for clarity.
-</comment>
-<comment line="15" endLine="18">
-<code>
-- if (input != null) {
--   foo(input)
--   bar(input)
-- }
-</code>
-This block is dead code after the refactor on line 9.
-</comment>
-</file>
-</code-review-comments>
-```
-
-Each comment includes the commented code with a `+`/`-` prefix indicating addition or deletion. Range comments emit one diff line per row inside `<code>`. The `version="2"` root attribute lets a consumer detect the current shape; the `<code>` payload is XML-escaped, so generics, JSX, and `&` survive intact.
+- **Viewed tracking / Staged & Untracked toggles / custom `git diff` args / persistent settings**
 
 ## Agent skills
 
-Install the diffx skill to use diffx directly from your AI coding agent:
+`skills/krit/` in this repo is a Claude Code skill exposing the streaming review loop as **`/krit`**: the agent launches the server, subscribes to the WebSocket, and replies/resolves as you comment; the session ends when you click **Done reviewing**. `skills/diffx/` is the same flow for the v1 CLI.
+
+Batch-style without an attached agent: click **Copy** in the toolbar and paste the XML into any chat.
+
+## Comment output format
+
+"Copy comments" produces structured XML (`<code-review-comments version="2">`): one `<file>` per path, one `<comment>` per thread with `line`/`endLine` attributes and the commented code as `+`/`-`-prefixed diff lines inside `<code>`, XML-escaped. The `version` attribute lets consumers detect shape changes.
+
+## The v1 fallback
+
+The original TypeScript implementation is still here and published to npm:
 
 ```bash
-npx skills add wong2/diffx
+npm install -g diffx-cli
 ```
 
-The skill is a single streaming entrypoint: **`/diffx`**. The agent launches `diffx` (which opens the browser tab and waits for your comments), subscribes to the `/api/events-ws` WebSocket, and processes each comment / user reply as it arrives. The session ends when you click **Done reviewing** in the toolbar.
+`diffx` and `krit` implement the same HTTP/WS API contract and share the web UI, so skills and integrations work against either. New development happens on krit.
 
-If you'd rather work batch-style without an attached agent, just click **Copy** in the toolbar and paste the XML into a chat — every consumer that parses the format above will still work.
-
-### Inline suggestions
-
-Every comment form has a **Suggest edit** toggle. Flip it on and the form pre-fills a syntax-highlighted CodeMirror editor with the lines you selected; edit them in place and submit. The comment then carries a `suggestion: { newLines }` payload alongside the body, and `Copy comments` emits it as a GitHub-style fenced block the agent can recognize:
-
-````
-<suggestion>
-```suggestion
-the rewritten lines
-```
-</suggestion>
-````
-
-### In-browser file editor
-
-Each diff header has an **Edit** button. Click it to open a fullscreen editor seeded with the file's current working-tree contents; save (`⌘S` or the button) writes back to disk and the diff view refreshes immediately via SSE. Useful for quick rewrites you don't want to formalize as a suggestion — the agent picks them up on the next poll. The editor is CodeMirror, with syntax highlighting, line numbers, and code folding.
-
-## Desktop app
-
-By default `diffx` opens each review in a tab in your default browser. Optionally, it can open each review in its own window of a dedicated **diffx** macOS app instead — handy when several reviews are in flight, since they collect as separate windows under a single dock icon rather than tabs scattered across your browser.
-
-Enable it in `~/.config/diffx/settings.json`:
-
-```json
-{ "launcher": "app" }
-```
-
-With that set, `diffx` fires a `diffx://review?url=…` deep link instead of opening a browser tab; the running app turns each link into a window keyed by the review's server port (re-running diffx for an already-open review just focuses its window). Leave `launcher` unset (or `"browser"`) for the default tab behavior — and if the app isn't installed, diffx notes it and falls back to printing the URL.
-
-The app is a thin [Tauri](https://v2.tauri.app/) shell living under [`desktop/`](desktop/); see [`desktop/README.md`](desktop/README.md) to build and install it (`cargo tauri build`, then drop `diffx.app` into `/Applications` and launch it once so macOS registers the `diffx://` scheme).
-
-## Developing locally
-
-To run a working copy of diffx from a checkout (instead of the published `diffx-cli` package), point the global `diffx` binary at your source tree once and rebuild after each change:
+## Development
 
 ```bash
-git clone https://github.com/wong2/diffx.git   # or your fork
-cd diffx
-pnpm install
-pnpm build                                     # produces dist/cli.mjs + dist/client/
-pnpm link --global                             # exposes `diffx` on PATH from this checkout
+just            # list targets
+just install    # cargo install --path krit (embeds a fresh UI build)
+just test       # Rust tests + TS typecheck
+just check      # fmt + clippy + typecheck
+just dev        # vite dev server (UI) — pair with a debug-build krit server
 ```
-
-`pnpm link --global` symlinks `<npm-global>/lib/node_modules/diffx-cli` to your checkout, so `which diffx` resolves to `dist/cli.mjs` in the working copy. Re-run `pnpm build` (or `pnpm dev:client` for live-reload during UI work) after editing.
-
-If you also want the `/diffx` skill to track your local source, link the SKILL.md into Claude Code's skills directory:
-
-```bash
-mkdir -p ~/.claude/skills/diffx
-ln skills/diffx/SKILL.md ~/.claude/skills/diffx/SKILL.md     # hardlink: edits visible at both paths
-# or, more robust across git checkouts:
-ln -s "$PWD/skills/diffx/SKILL.md" ~/.claude/skills/diffx/SKILL.md
-```
-
-The hardlink is what `npx skills add` lays down on first install — fastest path, but a git operation that rewrites the file via rename will break the link silently. The symlink survives every checkout (at the cost of a slightly less "vanilla" install).
 
 ## License
 
-MIT
+MIT — original diffx © [wong2](https://github.com/wong2); krit and later work © Keith Mosher. See [LICENSE](LICENSE).
